@@ -1,0 +1,6 @@
+interface:
+  display_name: "一次情報取得"
+  short_description: "公式サイトと承認済み一次情報から事実と出典を取得します。"
+  default_prompt: "$source-retrieval を使って、公式URLまたは一次情報から利用可能な事実を取得してください。"
+policy:
+  allow_implicit_invocation: true

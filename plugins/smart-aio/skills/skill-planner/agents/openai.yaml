@@ -1,0 +1,4 @@
+interface:
+  display_name: "Smart AIO Skill設計"
+  short_description: "業務を分解しSkill構成と評価基準を実装前に設計する"
+  default_prompt: "Use $skill-planner to design a versioned Smart AIO skill plan before implementation."

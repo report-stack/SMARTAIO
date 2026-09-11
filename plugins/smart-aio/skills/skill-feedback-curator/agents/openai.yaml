@@ -1,0 +1,4 @@
+interface:
+  display_name: "Smart AIO学習反映"
+  short_description: "繰り返し発生した指摘を整理し次版のルール候補にする"
+  default_prompt: "Use $skill-feedback-curator to curate repeated Smart AIO feedback into versioned rules."

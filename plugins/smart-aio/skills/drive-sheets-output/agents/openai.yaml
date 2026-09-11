@@ -1,0 +1,6 @@
+interface:
+  display_name: "Drive・Sheets出力"
+  short_description: "システム契約に沿った文書・画像・xlsxを顧客別Driveと台帳へ出力します。"
+  default_prompt: "$drive-sheets-output を使って、定義済みの命名規則と列更新を維持して成果物を保存してください。"
+policy:
+  allow_implicit_invocation: true

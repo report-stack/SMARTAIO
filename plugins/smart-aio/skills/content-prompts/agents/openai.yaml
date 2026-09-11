@@ -1,0 +1,6 @@
+interface:
+  display_name: "Smart AIOプロンプト"
+  short_description: "Smart AIOのプロンプトと制作ルールを原文のまま使用します。"
+  default_prompt: "$content-prompts の検証済み正本を使って制作してください。"
+policy:
+  allow_implicit_invocation: true

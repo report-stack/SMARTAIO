@@ -1,0 +1,4 @@
+interface:
+  display_name: "Smart AIO Skill修正案"
+  short_description: "評価結果から安全な修正差分を作り管理者承認へ回す"
+  default_prompt: "Use $fix-skill to prepare a safe and reviewable Smart AIO skill change proposal."

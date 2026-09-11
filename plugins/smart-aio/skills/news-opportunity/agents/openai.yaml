@@ -1,0 +1,6 @@
+interface:
+  display_name: "顧客別ニュース提案"
+  short_description: "指定クライアントのニュースを記事提案へ安全に変換します。"
+  default_prompt: "$news-opportunity を使って、指定クライアントのニュースから記事提案を作成してください。"
+policy:
+  allow_implicit_invocation: true

@@ -1,0 +1,6 @@
+interface:
+  display_name: "Smart AIO 統括"
+  short_description: "顧客登録から記事・画像・保存までを新システム内で一括制御します。"
+  default_prompt: "$smart-aio-orchestrator を使って、クライアント名と公式URLからSmart AIOを開始してください。"
+policy:
+  allow_implicit_invocation: true

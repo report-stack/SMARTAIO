@@ -1,0 +1,6 @@
+interface:
+  display_name: "顧客情報確認"
+  short_description: "顧客の基本情報、対象者、禁止事項、権限範囲を確認します。"
+  default_prompt: "$client-context を使って、対象顧客の記事制作条件を確認してください。"
+policy:
+  allow_implicit_invocation: true

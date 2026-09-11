@@ -1,0 +1,6 @@
+interface:
+  display_name: "Smart AIO 受付"
+  short_description: "新規顧客の自動登録と記事制作の依頼条件を整理します。"
+  default_prompt: "$smart-aio-intake を使って、クライアント名と公式URLから自動登録を開始してください。"
+policy:
+  allow_implicit_invocation: true

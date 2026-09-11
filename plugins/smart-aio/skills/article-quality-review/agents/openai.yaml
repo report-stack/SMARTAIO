@@ -1,0 +1,6 @@
+interface:
+  display_name: "Smart AIO記事レビュー"
+  short_description: "タイトル訴求、本文整合、根拠、重複、内部リンクを検査します。"
+  default_prompt: "$article-quality-review を使って、タイトルの訴求力と本文整合を含めて作成済み記事を検査してください。"
+policy:
+  allow_implicit_invocation: true

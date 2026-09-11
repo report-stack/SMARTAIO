@@ -1,0 +1,39 @@
+{
+  "version": "content-v1",
+  "execution": "SMART_AIO_SKILLS_ONLY",
+  "prompt_keys": [
+    "basic-info-research",
+    "article-ideas",
+    "article-writing",
+    "site-title",
+    "article-image-photo",
+    "thumbnail-title-image"
+  ],
+  "rules": {
+    "basic-info-research": {
+      "operation": "APPEND_INPUT",
+      "order": ["prompt", "blank_line", "blank_line", "official_site_content_or_supplied_text"]
+    },
+    "site-title": {
+      "operation": "APPEND_FIELDS",
+      "order": ["prompt", "service_name", "service_description"]
+    },
+    "article-ideas": {
+      "operation": "REPLACE_FIELDS_THEN_APPEND_INSTRUCTIONS",
+      "required_fields": ["client_context", "keyword_context", "past_articles", "source_facts", "topic_request", "responsibility_labels"],
+      "instruction_order": ["topic_priority", "slug_rule", "responsibility_deduplication"]
+    },
+    "article-writing": {
+      "operation": "APPEND_ARTICLE_JSON_THEN_RESPONSIBILITY_CONTROL",
+      "required_fields": ["article_json", "source_facts", "internal_link_candidates", "client_rules"]
+    },
+    "article-image-photo": {
+      "operation": "APPEND_IMAGE_FIELDS",
+      "order": ["prompt", "theme", "title", "composition", "size", "theme_color"]
+    },
+    "thumbnail-title-image": {
+      "operation": "APPEND_IMAGE_FIELDS",
+      "order": ["prompt", "theme", "title", "composition", "size", "theme_color"]
+    }
+  }
+}

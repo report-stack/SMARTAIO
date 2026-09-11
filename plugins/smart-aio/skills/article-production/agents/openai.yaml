@@ -1,0 +1,6 @@
+interface:
+  display_name: "Smart AIO記事制作"
+  short_description: "検索意図に強いタイトル、重複防止、記事制作を一体で進めます。"
+  default_prompt: "$article-production を使って、読者を惹きつける信頼性の高いタイトルを選び、記事企画から出力準備まで進めてください。"
+policy:
+  allow_implicit_invocation: true

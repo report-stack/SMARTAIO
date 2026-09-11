@@ -1,0 +1,4 @@
+interface:
+  display_name: "Smart AIO実行評価"
+  short_description: "実行ログと成果物から最初の失敗段階と原因を特定する"
+  default_prompt: "Use $skill-runtime-evaluator to evaluate a Smart AIO run and identify its first failure stage."

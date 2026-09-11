@@ -1,0 +1,4 @@
+interface:
+  display_name: "Smart AIO Skill検査"
+  short_description: "Skillの抜け矛盾と曖昧な指示を実行前に検査する"
+  default_prompt: "Use $skill-evaluator to inspect a Smart AIO skill before it is released."
