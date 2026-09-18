@@ -2659,3 +2659,16 @@ test("plugin source and workbooks contain no retired expressions", async () => {
     }
   }
 });
+
+test("workspace article workflow forbids restart prompts and requires marker evidence", async () => {
+  const orchestrator = await readFile(join(pluginRoot, "skills", "smart-aio-orchestrator", "SKILL.md"), "utf8");
+  const articleProduction = await readFile(join(pluginRoot, "skills", "article-production", "SKILL.md"), "utf8");
+  const articleContract = await readFile(join(pluginRoot, "skills", "article-production", "references", "article-contract.md"), "utf8");
+  const combined = `${orchestrator}\n${articleProduction}\n${articleContract}`;
+
+  assert.match(orchestrator, /同じ初回依頼の再送を求めてはならない/);
+  assert.match(orchestrator, /「続き」とだけ送れば同じ記事の残工程から再開/);
+  assert.doesNotMatch(combined, /同じ依頼をもう一度送ってください/);
+  assert.match(combined, /黄色マーカー(?:相当)?[^。\n]*2〜4箇所/);
+  assert.match(combined, /保存前と再読込後/);
+});
