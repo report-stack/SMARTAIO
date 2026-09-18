@@ -1,5 +1,5 @@
 const BASE_MECHANICAL_CHECKS = Object.freeze(["typos", "numbers", "proper_nouns", "prohibited_expressions", "format", "source_and_link_existence"]);
-const FINAL_MECHANICAL_CHECKS = Object.freeze([...BASE_MECHANICAL_CHECKS, "tag_section"]);
+const FINAL_MECHANICAL_CHECKS = Object.freeze([...BASE_MECHANICAL_CHECKS, "related_articles_section", "tag_and_source_sections_absent"]);
 
 const STAGES = Object.freeze({
   DIRECTION: Object.freeze({
@@ -27,7 +27,7 @@ const STAGES = Object.freeze({
     label: "完成物",
     humanApprovalRequired: false,
     categories: Object.freeze({ factuality: 25, completeness: 18, consistency: 12, readability: 15, visual_quality: 10, internal_links: 10, output_format: 5, article_metadata: 5 }),
-    requiredArtifacts: Object.freeze(["content", "sources_used", "internal_links", "visual_assets", "article_category", "hashtags", "rendered_tag_section"]),
+    requiredArtifacts: Object.freeze(["content", "sources_used", "internal_links", "visual_assets", "article_category", "hashtags", "related_articles_section"]),
     mechanicalChecks: FINAL_MECHANICAL_CHECKS,
   }),
 });

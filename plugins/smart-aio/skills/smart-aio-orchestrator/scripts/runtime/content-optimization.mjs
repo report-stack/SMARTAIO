@@ -11,6 +11,10 @@ function optionalText(value) {
   return String(value ?? "").trim();
 }
 
+function firstNonEmpty(...values) {
+  return values.map(optionalText).find(Boolean) || "";
+}
+
 function requireUrl(value, field) {
   const text = requireText(value, field);
   let parsed;
@@ -24,6 +28,26 @@ function requireUrl(value, field) {
   }
   parsed.hash = "";
   return parsed.toString();
+}
+
+function requirePublicArticleUrl(value, field) {
+  const url = requireUrl(value, field);
+  const host = new URL(url).hostname;
+  if (host === "drive.google.com" || host === "docs.google.com") {
+    throw new Error(`CONTENT_OPTIMIZATION_${field.toUpperCase()}_MUST_BE_PUBLIC_ARTICLE_URL`);
+  }
+  return url;
+}
+
+function resolvePublicArticleUrl(article = {}, field = "public_url") {
+  const publicUrl = firstNonEmpty(article.public_url, article["公開URL"]);
+  if (publicUrl) return requirePublicArticleUrl(publicUrl, field);
+  const compatWordPressUrl = firstNonEmpty(article.wordpress_url, article.WordPressURL, article["WordPressURL"]);
+  if (compatWordPressUrl) return requirePublicArticleUrl(compatWordPressUrl, `${field}_compat_wordpress_url`);
+  if (firstNonEmpty(article.article_url, article["記事URL"], article.url)) {
+    throw new Error(`CONTENT_OPTIMIZATION_${field.toUpperCase()}_ARTICLE_URL_FORBIDDEN`);
+  }
+  throw new Error("CONTENT_OPTIMIZATION_INTERNAL_LINK_PUBLIC_URL_REQUIRED");
 }
 
 function linkStatusLabel(url) {
@@ -118,46 +142,31 @@ function articleText(article = {}) {
   ].filter(Boolean).join(" ");
 }
 
-const FORBIDDEN_INTERNAL_LINK_BLOCK_PATTERN = /(こんな記事も見て|こんな記事も見てね|関連記事|関連リンク|おすすめ記事|あわせて読みたい|こちらもご覧|参考記事|次の記事もおすすめ)/i;
-
-function normalizeContextualPlacement(link = {}, targetUrl, anchorText) {
+function normalizeRelatedArticlesPlacement(link = {}) {
   const placement = link.placement && typeof link.placement === "object" && !Array.isArray(link.placement)
     ? link.placement
-    : link.contextual_placement && typeof link.contextual_placement === "object" && !Array.isArray(link.contextual_placement)
-      ? link.contextual_placement
+    : link.related_articles_placement && typeof link.related_articles_placement === "object" && !Array.isArray(link.related_articles_placement)
+      ? link.related_articles_placement
       : {};
   const placementType = String(placement.type ?? placement.placement_type ?? link.placement_type ?? "").trim().toUpperCase();
-  if (placementType && placementType !== "CONTEXTUAL_BODY") {
+  if (placementType && placementType !== "RELATED_ARTICLES_AFTER_QA") {
     throw new Error("CONTENT_OPTIMIZATION_INTERNAL_LINK_PLACEMENT_TYPE_INVALID");
   }
-  if (placement.in_body !== true && link.in_body !== true) {
-    throw new Error("CONTENT_OPTIMIZATION_INTERNAL_LINK_CONTEXTUAL_BODY_REQUIRED");
+  if (placement.after_qa !== true && link.after_qa !== true) {
+    throw new Error("CONTENT_OPTIMIZATION_RELATED_ARTICLES_AFTER_QA_REQUIRED");
   }
-  const sourceExcerpt = requireText(placement.source_excerpt ?? placement.surrounding_text ?? link.source_excerpt, "internal_link_source_excerpt");
-  if (FORBIDDEN_INTERNAL_LINK_BLOCK_PATTERN.test(sourceExcerpt)) {
-    throw new Error("CONTENT_OPTIMIZATION_INTERNAL_LINK_RECOMMENDATION_BLOCK_FORBIDDEN");
+  if (placement.section_label !== undefined && String(placement.section_label).trim() !== "関連記事") {
+    throw new Error("CONTENT_OPTIMIZATION_RELATED_ARTICLES_LABEL_REQUIRED");
   }
-  if (!sourceExcerpt.includes(targetUrl)) {
-    throw new Error("CONTENT_OPTIMIZATION_INTERNAL_LINK_TARGET_URL_NOT_IN_EXCERPT");
-  }
-  if (!sourceExcerpt.includes(anchorText)) {
-    throw new Error("CONTENT_OPTIMIZATION_INTERNAL_LINK_ANCHOR_TEXT_NOT_IN_EXCERPT");
-  }
-  if (sourceExcerpt.trim() === targetUrl || sourceExcerpt.trim() === anchorText) {
-    throw new Error("CONTENT_OPTIMIZATION_INTERNAL_LINK_NATURAL_SENTENCE_REQUIRED");
-  }
-  const naturalSentenceVerified = placement.natural_sentence_verified === true || link.natural_sentence_verified === true;
-  if (!naturalSentenceVerified) {
-    throw new Error("CONTENT_OPTIMIZATION_INTERNAL_LINK_NATURAL_SENTENCE_REQUIRED");
+  if (placement.section_is_heading === true || link.section_is_heading === true) {
+    throw new Error("CONTENT_OPTIMIZATION_RELATED_ARTICLES_HEADING_FORBIDDEN");
   }
   return Object.freeze({
-    type: "CONTEXTUAL_BODY",
-    in_body: true,
-    section_heading: optionalText(placement.section_heading ?? link.section_heading) || null,
-    source_excerpt: sourceExcerpt,
-    natural_sentence_verified: true,
-    audit_excerpt_may_include_url: true,
-    doc_output_policy: "ANCHOR_TEXT_NATIVE_LINK_WITHOUT_BARE_URL_PARAGRAPH",
+    type: "RELATED_ARTICLES_AFTER_QA",
+    after_qa: true,
+    section_label: "関連記事",
+    section_is_heading: false,
+    doc_output_policy: "TITLE_NATIVE_LINKS_UNDER_PLAIN_RELATED_ARTICLES_LABEL",
   });
 }
 
@@ -165,7 +174,7 @@ function normalizeLink(link = {}, clientId, currentArticleId) {
   const targetArticleId = requireText(link.target_article_id ?? link.article_id, "target_article_id");
   if (targetArticleId === currentArticleId) throw new Error("CONTENT_OPTIMIZATION_SELF_LINK_FORBIDDEN");
   if (String(link.client_id || clientId).trim() !== clientId) throw new Error("CROSS_CLIENT_DATA_DETECTED:internal_links");
-  const targetUrl = requireUrl(link.target_url ?? link.url, "target_url");
+  const targetUrl = requirePublicArticleUrl(link.target_url ?? link.public_url ?? link.wordpress_url ?? link.url, "target_url");
   const anchorText = requireText(link.anchor_text ?? link.target_title ?? link.title, "anchor_text");
   return Object.freeze({
     client_id: clientId,
@@ -176,7 +185,7 @@ function normalizeLink(link = {}, clientId, currentArticleId) {
     anchor_text: anchorText,
     score: Number(link.score ?? 0),
     reason: optionalText(link.reason) || "同一顧客の記事間で検索意図が近い",
-    placement: normalizeContextualPlacement(link, targetUrl, anchorText),
+    placement: normalizeRelatedArticlesPlacement(link),
   });
 }
 
@@ -226,8 +235,9 @@ export function planInternalLinkGraph(input = {}) {
   const currentText = articleText(article);
   const limit = Math.max(1, Math.min(8, Number(input.limit ?? input.internalLinkLimit ?? 5) || 5));
   const candidates = existingArticles
-    .filter((item) => String(item.article_id || "").trim() && String(item.article_id).trim() !== articleId && optionalText(item.url))
+    .filter((item) => String(item.article_id || "").trim() && String(item.article_id).trim() !== articleId)
     .map((item) => {
+      const targetUrl = resolvePublicArticleUrl(item, "existing_article_public_url");
       const categoryBoost = article.category && item.category === article.category ? 0.25 : 0;
       const score = Math.min(1, similarity(currentText, articleText(item)) + categoryBoost);
       return Object.freeze({
@@ -235,13 +245,20 @@ export function planInternalLinkGraph(input = {}) {
         source_article_id: articleId,
         target_article_id: String(item.article_id).trim(),
         target_title: requireText(item.title, "existing_article.title"),
-        target_url: requireUrl(item.url, "existing_article.url"),
+        target_url: targetUrl,
+        target_url_source: firstNonEmpty(item.public_url, item["公開URL"]) ? "公開URL" : "WordPressURL",
         anchor_text: optionalText(item.anchor_text) || requireText(item.title, "existing_article.title"),
         score: Number(score.toFixed(3)),
         reason: categoryBoost ? "同一カテゴリの記事として関連" : "検索意図または責任範囲が関連",
-        placement_policy: "CONTEXTUAL_BODY_REQUIRED_BEFORE_FINAL_REVIEW",
+        placement_policy: "RELATED_ARTICLES_AFTER_QA_REQUIRED",
+        placement: Object.freeze({
+          type: "RELATED_ARTICLES_AFTER_QA",
+          after_qa: true,
+          section_label: "関連記事",
+          section_is_heading: false,
+        }),
         target_already_links_to_source: Array.isArray(item.internal_links)
-          && item.internal_links.some((link) => String(link.target_article_id || "").trim() === articleId || String(link.target_url || "").trim() === optionalText(article.url)),
+          && item.internal_links.some((link) => String(link.target_article_id || "").trim() === articleId || String(link.target_url || "").trim() === firstNonEmpty(article.public_url, article["公開URL"], article.wordpress_url, article.WordPressURL, article["WordPressURL"])),
       });
     })
     .filter((item) => item.score > 0)
@@ -255,9 +272,10 @@ export function planInternalLinkGraph(input = {}) {
       source_article_id: item.target_article_id,
       target_article_id: articleId,
       target_title: requireText(article.title, "article.title"),
-      target_url: optionalText(article.url) || "PENDING_PUBLICATION_URL",
+      target_url: resolvePublicArticleUrl(article, "article_public_url"),
+      target_url_source: firstNonEmpty(article.public_url, article["公開URL"]) ? "公開URL" : "WordPressURL",
       anchor_text: requireText(article.title, "article.title"),
-      action: "ADD_CONTEXTUAL_INTERNAL_LINK_TO_EXISTING_ARTICLE",
+      action: "ADD_RELATED_ARTICLE_LINK_TO_EXISTING_ARTICLE",
       approval_gate: "UPDATE_EXISTING_PUBLISHED_ARTICLE_REQUIRES_FINAL_APPROVAL",
     }));
 
@@ -269,7 +287,7 @@ export function planInternalLinkGraph(input = {}) {
     reciprocal_update_plan: Object.freeze(reciprocalUpdatePlan),
     existing_article_update_required: reciprocalUpdatePlan.length > 0,
     cross_client_links_allowed: false,
-    placement_policy: "本文末尾の関連記事ブロックではなく、本文中の自然な文脈へ挿入する。FINAL検証時は各リンクにplacement.source_excerptを必須にする。",
+    placement_policy: "Q&Aの直後にHタグなしの「関連記事」ラベルを置き、対象記事タイトルへネイティブリンクを付ける。本文中のテキストリンク、タグ、出典セクションとしては出力しない。",
     completion_gate: "verify-internal-link-graph",
   });
 }
@@ -292,9 +310,10 @@ export function verifyInternalLinkGraph(input = {}, expected = {}) {
     status: "VERIFIED_INTERNAL_LINK_GRAPH",
     client_id: clientId,
     article_id: articleId,
+    existing_article_count: existingArticleCount,
     outbound_link_count: links.length,
     reciprocal_update_count: reciprocal.length,
-    placement_policy: "CONTEXTUAL_BODY_ONLY",
+    placement_policy: "RELATED_ARTICLES_AFTER_QA_ONLY",
     outbound_links: Object.freeze(links),
     reciprocal_update_plan: Object.freeze(reciprocal),
   });
@@ -305,9 +324,9 @@ export function prepareInternalLinkSheetOutput(input = {}) {
   const verified = verifyInternalLinkGraph(graph, input.expected ?? {});
   const managementFileUrl = input.management_file_url || input.file_url ? requireGoogleDriveFileUrl(input.management_file_url ?? input.file_url, "management_file_url") : null;
   const outboundLines = verified.outbound_links.map((link, index) => [
-    `本文内リンク${index + 1}（${linkStatusLabel(link.target_url)}）: ${link.target_url}`,
-    link.placement.section_heading ? `設置見出し: ${link.placement.section_heading}` : null,
-    `設置文: ${link.placement.source_excerpt}`,
+    `関連記事${index + 1}（${linkStatusLabel(link.target_url)}）: ${link.target_title}`,
+    `遷移先: ${link.target_url}`,
+    "表示位置: Q&A直後の「関連記事」（Hタグなし）",
   ].filter(Boolean).join("\n"));
   const reciprocalLines = verified.reciprocal_update_plan.map((link, index) => {
     const targetUrl = requireUrl(link.target_url, `reciprocal_update_plan_${index + 1}_target_url`);
@@ -337,6 +356,41 @@ function normalizeQuestionAnswer(item = {}) {
   });
 }
 
+function normalizeQuestionAnswerText(value) {
+  return String(value ?? "")
+    .normalize("NFKC")
+    .replace(/\s+/g, "")
+    .replace(/^Q[:：]/i, "")
+    .replace(/^A[:：]/i, "")
+    .trim();
+}
+
+function normalizeFaqItems(items = []) {
+  if (!Array.isArray(items) || items.length !== 5) {
+    throw new Error("CONTENT_OPTIMIZATION_FAQ_EXACTLY_FIVE_REQUIRED");
+  }
+  return Object.freeze(items.map(normalizeQuestionAnswer));
+}
+
+function verifyFaqSync(faqItems, article = {}, input = {}) {
+  const bodyFaqItems = article.body_faq_items ?? input.body_faq_items ?? article.document_faq_items ?? input.document_faq_items;
+  if (!Array.isArray(bodyFaqItems) || bodyFaqItems.length !== 5) {
+    throw new Error("CONTENT_OPTIMIZATION_BODY_FAQ_EXACTLY_FIVE_REQUIRED");
+  }
+  const normalizedBody = bodyFaqItems.map((item) => ({
+    question: normalizeQuestionAnswerText(item.question ?? item.name),
+    answer: normalizeQuestionAnswerText(item.answer ?? item.text),
+  }));
+  const normalizedSchema = faqItems.map((item) => ({
+    question: normalizeQuestionAnswerText(item.name),
+    answer: normalizeQuestionAnswerText(item.acceptedAnswer?.text),
+  }));
+  if (JSON.stringify(normalizedBody) !== JSON.stringify(normalizedSchema)) {
+    throw new Error("CONTENT_OPTIMIZATION_FAQ_SCHEMA_MUST_MATCH_BODY_QA");
+  }
+  return true;
+}
+
 function normalizeHowToStep(item = {}, index) {
   return Object.freeze({
     "@type": "HowToStep",
@@ -363,14 +417,22 @@ export function buildStructuredMarkupOutput(input = {}) {
   const articleId = requireText(article.article_id ?? input.article_id, "article_id");
   if (String(article.client_id || clientId).trim() !== clientId) throw new Error("CROSS_CLIENT_DATA_DETECTED:structured_article");
   const site = input.site || {};
-  const articleUrl = requireUrl(article.url ?? input.article_url, "article_url");
+  const articleUrl = resolvePublicArticleUrl({
+    public_url: firstNonEmpty(article.public_url, article["公開URL"], input.public_url, input["公開URL"]),
+    wordpress_url: firstNonEmpty(article.wordpress_url, article.WordPressURL, article["WordPressURL"], input.wordpress_url, input.WordPressURL, input["WordPressURL"]),
+    article_url: firstNonEmpty(article.article_url, article["記事URL"], article.url, input.article_url, input["記事URL"], input.url),
+  }, "article_public_url");
   const siteUrl = requireUrl(site.url ?? input.site_url, "site_url");
   const title = requireText(article.title ?? input.title, "title");
-  const description = requireText(article.description ?? article.summary ?? input.description, "description");
+  const metaDescription = requireText(firstNonEmpty(article.meta_description, article.metaDescription, article["メタディスクリプション"], input.meta_description, input.metaDescription, input["メタディスクリプション"]), "meta_description");
+  const suppliedDescription = requireText(article.description ?? input.description ?? metaDescription, "description");
+  if (suppliedDescription !== metaDescription) {
+    throw new Error("CONTENT_OPTIMIZATION_DESCRIPTION_MUST_MATCH_META_DESCRIPTION_COLUMN");
+  }
   const authorName = requireText(resolveStructuredAuthorName({ article, site, input }), "profile_widget_author_name");
   const category = optionalText(article.category);
-  const keywords = Array.isArray(article.keywords) ? article.keywords.map(String) : String(article.hashtags ?? article.basicInfo?.hashtags ?? "").split(/[,\s、，]+/);
-  const faqItems = Array.isArray(input.faq_items ?? article.faq_items) ? (input.faq_items ?? article.faq_items) : [];
+  const faqItems = normalizeFaqItems(input.faq_items ?? article.faq_items ?? article.qa_items ?? article["Q&A"]);
+  verifyFaqSync(faqItems, article, input);
   const howToSteps = Array.isArray(input.how_to_steps ?? article.how_to_steps) ? (input.how_to_steps ?? article.how_to_steps) : [];
   const graph = [
     Object.freeze({
@@ -378,9 +440,8 @@ export function buildStructuredMarkupOutput(input = {}) {
       "@id": `${articleUrl}#article`,
       mainEntityOfPage: articleUrl,
       headline: title,
-      description,
+      description: metaDescription,
       articleSection: category || undefined,
-      keywords: Object.freeze(keywords.map((item) => String(item).replace(/^#/, "").trim()).filter(Boolean)),
       author: Object.freeze({ "@type": "Organization", name: authorName }),
       datePublished: optionalText(article.date_published ?? input.date_published) || undefined,
       dateModified: requireText(article.date_modified ?? input.date_modified, "date_modified"),
@@ -395,7 +456,7 @@ export function buildStructuredMarkupOutput(input = {}) {
       ]),
     }),
   ];
-  if (faqItems.length) graph.push(Object.freeze({ "@type": "FAQPage", mainEntity: Object.freeze(faqItems.map(normalizeQuestionAnswer)) }));
+  graph.push(Object.freeze({ "@type": "FAQPage", mainEntity: faqItems }));
   if (howToSteps.length) graph.push(Object.freeze({ "@type": "HowTo", name: title, step: Object.freeze(howToSteps.map(normalizeHowToStep)) }));
 
   const markup = Object.freeze({
@@ -433,12 +494,30 @@ export function verifyStructuredMarkupOutput(input = {}, expected = {}) {
   const graph = Array.isArray(markup["@graph"]) ? markup["@graph"] : [];
   const article = graph.find((item) => item?.["@type"] === "Article");
   const breadcrumb = graph.find((item) => item?.["@type"] === "BreadcrumbList");
+  const faq = graph.find((item) => item?.["@type"] === "FAQPage");
   if (!article?.headline || !article?.description || !article?.mainEntityOfPage || !article?.dateModified) {
     throw new Error("CONTENT_OPTIMIZATION_ARTICLE_SCHEMA_INCOMPLETE");
   }
   if (!article?.author?.name) throw new Error("CONTENT_OPTIMIZATION_ARTICLE_AUTHOR_REQUIRED");
   if (article.publisher !== undefined) throw new Error("CONTENT_OPTIMIZATION_ARTICLE_PUBLISHER_FORBIDDEN");
+  if (article.keywords !== undefined) throw new Error("CONTENT_OPTIMIZATION_ARTICLE_KEYWORDS_FORBIDDEN");
+  if (article.image !== undefined) throw new Error("CONTENT_OPTIMIZATION_ARTICLE_IMAGE_FORBIDDEN");
   if (!breadcrumb?.itemListElement?.length) throw new Error("CONTENT_OPTIMIZATION_BREADCRUMB_SCHEMA_REQUIRED");
+  if (!Array.isArray(faq?.mainEntity) || faq.mainEntity.length !== 5) throw new Error("CONTENT_OPTIMIZATION_FAQ_EXACTLY_FIVE_REQUIRED");
+  if (expected.description && article.description !== String(expected.description).trim()) {
+    throw new Error("CONTENT_OPTIMIZATION_DESCRIPTION_MUST_MATCH_META_DESCRIPTION_COLUMN");
+  }
+  const articleMainEntityUrl = requirePublicArticleUrl(article.mainEntityOfPage, "article_main_entity_of_page");
+  const expectedPublicUrl = firstNonEmpty(expected.public_url, expected["公開URL"], expected.wordpress_url, expected.WordPressURL, expected["WordPressURL"]);
+  if (expectedPublicUrl) {
+    const expectedArticleUrl = resolvePublicArticleUrl(expected, "expected_article_public_url");
+    if (articleMainEntityUrl !== expectedArticleUrl) {
+      throw new Error("CONTENT_OPTIMIZATION_ARTICLE_MAIN_ENTITY_OF_PAGE_MISMATCH");
+    }
+  } else if (firstNonEmpty(expected.article_url, expected["記事URL"], expected.url)) {
+    throw new Error("CONTENT_OPTIMIZATION_EXPECTED_ARTICLE_PUBLIC_URL_ARTICLE_URL_FORBIDDEN");
+  }
+  if (expected.body_faq_items) verifyFaqSync(faq.mainEntity, { body_faq_items: expected.body_faq_items });
   if (input.file_in_article_folder !== true) throw new Error("CONTENT_OPTIMIZATION_STRUCTURED_FILE_FOLDER_MEMBERSHIP_REQUIRED");
   const wordpressCopyFileUrl = requireGoogleDriveFileUrl(input.wordpress_copy_file_url ?? input.copy_file_url, "wordpress_copy_file_url");
   if (input.wordpress_copy_file_in_article_folder !== true) throw new Error("CONTENT_OPTIMIZATION_STRUCTURED_WORDPRESS_COPY_FOLDER_MEMBERSHIP_REQUIRED");

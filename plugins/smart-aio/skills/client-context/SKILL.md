@@ -9,7 +9,7 @@ description: 記事制作前にSMARTAIO本番Drive直下クライアントフォ
 
 ## 手順
 
-1. 受付結果の `client_id` をSMARTAIO本番Drive直下のクライアントフォルダー名・制作シートの `設定`・Drive候補の `trashed=false` で照合し、記事制作シートURLと一次情報フォルダーを取得する。顧客マスターファイルは必須にしない。Drive検索結果は `trashed=false` を明示確認した項目だけを現行コンテキストに採用し、`trashed=true` のID・URLは再利用禁止として記録する。ゴミ箱状態が未取得なら制作を開始しない。記事制作シートURLがない顧客は制作を開始せず、`prepare-client-production-sheet` で新しい専用シートを準備する。一次情報フォルダー内に有効な `${client_id}_${クライアント名}_一次情報台帳` がない場合は、`prepare-client-source-register` で新規作成する。
+1. SMARTAIO本番Driveの正本URLは `https://drive.google.com/drive/folders/0AJAK01qgUBq4Uk9PVA` とする。受付結果の `client_id` をこのSMARTAIO本番Drive直下のクライアントフォルダー名・制作シートの `設定`・Drive候補の `trashed=false` で照合し、記事制作シートURLと一次情報フォルダーを取得する。顧客マスターファイルは必須にしない。Drive検索結果は `trashed=false` を明示確認した項目だけを現行コンテキストに採用し、`trashed=true` のID・URLは再利用禁止として記録する。ゴミ箱状態が未取得なら制作を開始しない。記事制作シートURLがない顧客は制作を開始せず、`prepare-client-production-sheet` で新しい専用シートを準備する。新規クライアントフォルダーは必ずこのSMARTAIO本番Drive直下に作成し、別Drive、My Drive直下、親未指定では作成しない。一次情報フォルダー内に有効な `${client_id}_${クライアント名}_一次情報台帳` がない場合は、`prepare-client-source-register` で新規作成する。
 2. 利用者が対象顧客の操作権限を持つか確認する。記事の制作担当は `Smart AIO（AI）`、品質確認は `Smart AIO独立レビューAI` とし、人の権限は完成物の `FINAL_APPROVAL` を記録できる最終承認者または管理者として扱う。
 3. クライアント別記事制作シートの `基本情報`、`記事一覧`、`クラスター`、`設定` と、`01_一次情報` 内の一次情報台帳を読み、サービス、対象読者、強み、表現ルール、禁止事項、過去記事、利用可能な一次情報、ニュース設定、出力先を取得する。
 4. 情報ごとに根拠URL、版、更新日、利用可否を確認する。
@@ -22,6 +22,7 @@ description: 記事制作前にSMARTAIO本番Drive直下クライアントフォ
 
 - 別の `client_id` の一次情報、ニュース、記事提案を混在させない。
 - ゴミ箱内の顧客レコード、フォルダー、Sheets、Docs、画像を現行コンテキストへ採用せず、そのID・URLを新しい成果物へ再割当てしない。
+- SMARTAIO本番Drive `https://drive.google.com/drive/folders/0AJAK01qgUBq4Uk9PVA` 以外を新規クライアントフォルダーの親として扱わない。
 - 中央管理台帳の `記事台帳` を担当者の入力先や過去記事の正本として使わない。
 - 権限外の顧客名や記事名を候補として表示しない。
 - `利用可否=不可` または `要確認` の内容を事実として本文へ使わない。

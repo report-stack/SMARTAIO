@@ -150,7 +150,7 @@ export function createPerformanceReport(input = {}) {
       insights: summarizeInsights({ articles, rewrites, rankings, learnings }),
       next_actions: Object.freeze((input.next_actions || []).map((item) => requireText(item, "next_action"))),
     }),
-    required_sources: Object.freeze(["記事一覧", "実行履歴", "レビュー", "順位・分析", "WordPressURL"]),
+    required_sources: Object.freeze(["記事一覧", "実行履歴", "レビュー", "順位・分析", "公開URL"]),
     google_doc_title: `${clientId}_${definition.label}レポート_${periodStart}_${periodEnd}`,
     google_sheet_title: `${clientId}_${definition.label}レポート_${periodStart}_${periodEnd}`,
     stores_secrets: false,

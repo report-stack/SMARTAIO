@@ -3,6 +3,8 @@ import { requireStandardClientRunAudit, verifyArticleDocumentReadbackEvidence } 
 import { verifyInternalLinkGraph, verifyStructuredMarkupOutput } from "./content-optimization.mjs";
 import { requireCurrentSmartAioPluginVersion } from "./version.mjs";
 
+const SMARTAIO_PRODUCTION_ROOT_URL = "https://drive.google.com/drive/folders/0AJAK01qgUBq4Uk9PVA";
+
 function requireText(value, field) {
   const text = String(value ?? "").trim();
   if (!text) throw new Error(`COMPLETION_REPORT_${field.toUpperCase()}_REQUIRED`);
@@ -48,6 +50,9 @@ function requireDriveScopeEvidence(input, driveFolderUrl, imageFolderUrl, produc
   const articleFolderUrl = requireGoogleUrl(evidence.article_folder_url, "drive_scope_article_folder_url", /^\/drive\/folders\//);
   const scopedImageFolderUrl = requireGoogleUrl(evidence.image_folder_url, "drive_scope_image_folder_url", /^\/drive\/folders\//);
   const scopedProductionSheetUrl = requireGoogleUrl(evidence.production_sheet_url, "drive_scope_production_sheet_url", /^\/spreadsheets\/d\//);
+  if (smartaioRootUrl !== SMARTAIO_PRODUCTION_ROOT_URL) {
+    throw new Error("COMPLETION_REPORT_DRIVE_SCOPE_SMARTAIO_ROOT_URL_MISMATCH");
+  }
   if (articleFolderUrl !== driveFolderUrl) {
     throw new Error("COMPLETION_REPORT_DRIVE_SCOPE_ARTICLE_FOLDER_MISMATCH");
   }
@@ -86,6 +91,9 @@ function requireDriveScopeEvidence(input, driveFolderUrl, imageFolderUrl, produc
 
   const clientDriveFolderId = extractDriveFolderId(clientDriveUrl);
   const smartaioRootFolderId = extractDriveFolderId(smartaioRootUrl);
+  if (clientDriveFolderId === smartaioRootFolderId) {
+    throw new Error("COMPLETION_REPORT_DRIVE_SCOPE_CLIENT_FOLDER_MUST_NOT_BE_SMARTAIO_ROOT");
+  }
   const articleFolderId = extractDriveFolderId(articleFolderUrl);
   const imageFolderId = extractDriveFolderId(scopedImageFolderUrl);
   return Object.freeze({
@@ -184,27 +192,48 @@ export function prepareArticleCompletionReport(input = {}) {
   const clientId = requireText(input.client_id, "client_id");
   const articleId = requireText(input.article_id, "article_id");
   const title = requireText(input.title, "title");
+  const metaDescription = requireText(input.meta_description ?? input["メタディスクリプション"], "meta_description");
+  const publicUrl = requireText(input.public_url ?? input["公開URL"], "public_url");
+  const publicUrlSheetReadback = input.public_url_sheet_readback || {};
+  if (publicUrlSheetReadback.reloaded_after_write !== true) {
+    throw new Error("COMPLETION_REPORT_PUBLIC_URL_SHEET_READBACK_REQUIRED");
+  }
+  if (String(publicUrlSheetReadback.column_name || publicUrlSheetReadback.header || "").trim() !== "公開URL") {
+    throw new Error("COMPLETION_REPORT_PUBLIC_URL_COLUMN_MUST_BE_CANONICAL");
+  }
+  if (requireText(publicUrlSheetReadback.value, "public_url_sheet_readback.value") !== publicUrl) {
+    throw new Error("COMPLETION_REPORT_PUBLIC_URL_SHEET_READBACK_MISMATCH");
+  }
+  const bodyFaqItems = input.body_faq_items ?? input.document_faq_items;
+  if (!Array.isArray(bodyFaqItems) || bodyFaqItems.length !== 5) {
+    throw new Error("COMPLETION_REPORT_BODY_FAQ_EXACTLY_FIVE_REQUIRED");
+  }
   const documentUrl = requireGoogleUrl(input.document_url, "document_url", /^\/document\/d\//);
   const documentPersistence = requireDocumentPersistence(input, documentUrl);
   const driveFolderUrl = requireGoogleUrl(input.drive_folder_url, "drive_folder_url", /^\/drive\/folders\//);
   const imageFolderUrl = requireGoogleUrl(input.image_folder_url, "image_folder_url", /^\/drive\/folders\//);
   const imagePersistence = verifyArticleVisualPersistence(input.image_persistence, { client_id: clientId, article_id: articleId });
   if (imagePersistence.image_folder_url !== imageFolderUrl) throw new Error("COMPLETION_REPORT_IMAGE_FOLDER_MISMATCH");
-  const structuredMarkup = verifyStructuredMarkupOutput(input.structured_markup, { client_id: clientId, article_id: articleId });
+  const structuredMarkup = verifyStructuredMarkupOutput(input.structured_markup, {
+    client_id: clientId,
+    article_id: articleId,
+    description: metaDescription,
+    public_url: publicUrl,
+    body_faq_items: bodyFaqItems,
+  });
   const internalLinkGraph = verifyInternalLinkGraph(input.internal_link_graph, { client_id: clientId, article_id: articleId });
-  const renderedHashtags = requireText(input.hashtags ?? input.rendered_hashtags, "hashtags");
   const articleDocumentReadback = verifyArticleDocumentReadbackEvidence(input.article_document_readback, {
     client_id: clientId,
     article_id: articleId,
     document_id: documentPersistence.document_id,
     normalized_character_count: documentPersistence.character_count,
     readback_sha256: documentPersistence.sha256,
-    rendered_hashtags: renderedHashtags,
     embedded_images: [
       ...imagePersistence.images.map((image) => ({ ...image, image_role: image.role })),
       { ...imagePersistence.diagram_image, image_role: "DIAGRAM" },
     ],
     internal_links: internalLinkGraph.outbound_links,
+    existing_article_count: internalLinkGraph.existing_article_count,
   });
   const productionSheetUrl = requireGoogleUrl(input.updated_sheet_url ?? input.production_sheet_url, "updated_sheet_url", /^\/spreadsheets\/d\//);
   const driveScopeEvidence = requireDriveScopeEvidence(input, driveFolderUrl, imageFolderUrl, productionSheetUrl, articleId);
@@ -234,7 +263,14 @@ export function prepareArticleCompletionReport(input = {}) {
     image_persistence: imagePersistence,
     structured_markup: structuredMarkup,
     internal_link_graph: internalLinkGraph,
+    public_url: publicUrl,
+    public_url_sheet_readback: Object.freeze({
+      reloaded_after_write: true,
+      column_name: "公開URL",
+      value: publicUrl,
+    }),
     required_links: Object.freeze({
+      published_article: publicUrl,
       article_document: documentUrl,
       drive_storage: driveFolderUrl,
       updated_spreadsheet: productionSheetUrl,
@@ -243,6 +279,7 @@ export function prepareArticleCompletionReport(input = {}) {
       diagram_image: imagePersistence.diagram_image.file_url,
     }),
     markdown_lines: Object.freeze([
+      `公開URL: [${articleId} 公開記事](${publicUrl})`,
       `記事本文: [${articleId} ${title}](${documentUrl})`,
       `Drive格納先: [${articleId} フォルダー](${driveFolderUrl})`,
       `タイトル画像1枚・通常画像3枚: [${articleId}_1.png〜${articleId}_4.png](${imageFolderUrl})`,

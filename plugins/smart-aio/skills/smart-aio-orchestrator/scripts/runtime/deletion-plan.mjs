@@ -1,23 +1,24 @@
 // Canonical Smart AIO Skill runtime. Backend modules only re-export this implementation.
 import { createHash, timingSafeEqual } from "node:crypto";
+import { resolveArticleSheetColumnMap } from "./article-sheet-layout.mjs";
 
 const TARGET_RULES = Object.freeze({
   ARTICLE: Object.freeze({
     drive_scope: "ARTICLE_FOLDER",
-    sheet_columns: "D:T",
-    selection_checkbox_column: "M",
+    sheet_headers: Object.freeze(["ピラー", "画像のみ削除"]),
+    selection_checkbox_header: "全部削除",
     trashed_mime_types: Object.freeze(["FOLDER_WITH_ALL_CONTENTS"]),
   }),
   DOCUMENTS_AND_IMAGES: Object.freeze({
     drive_scope: "GOOGLE_DOCS_AND_PNG_JPEG",
-    sheet_columns: "N:S",
-    selection_checkbox_column: "P",
+    sheet_headers: Object.freeze(["記事完成", "画像のみ削除"]),
+    selection_checkbox_header: "記事&画像削除",
     trashed_mime_types: Object.freeze(["application/vnd.google-apps.document", "image/jpeg", "image/png"]),
   }),
   IMAGES_ONLY: Object.freeze({
     drive_scope: "PNG_JPEG_ONLY",
-    sheet_columns: "Q:S",
-    selection_checkbox_column: "S",
+    sheet_headers: Object.freeze(["画像完成", "画像のみ削除"]),
+    selection_checkbox_header: "画像のみ削除",
     trashed_mime_types: Object.freeze(["image/jpeg", "image/png"]),
   }),
 });
@@ -51,15 +52,19 @@ export function createDeletionPlan(input, { secret = "local-confirmation-only", 
     throw new Error("INVALID_PARENT_DRIVE_URL");
   }
   const expiresAt = new Date(now.getTime() + ttlMinutes * 60_000).toISOString();
+  const columnMap = resolveArticleSheetColumnMap(input.article_headers);
+  const [clearStartHeader, clearEndHeader] = rule.sheet_headers;
   const unsigned = Object.freeze({
     client_id: clientId,
     target_type: targetType,
     article_ids: Object.freeze(articleIds),
     parent_drive_url: parentDriveUrl,
     drive_scope: rule.drive_scope,
-    selection_checkbox_column: rule.selection_checkbox_column,
+    selection_checkbox_header: rule.selection_checkbox_header,
+    selection_checkbox_column: columnMap[rule.selection_checkbox_header],
     trashed_mime_types: rule.trashed_mime_types,
-    sheet_columns_to_clear: rule.sheet_columns,
+    sheet_headers_to_clear: rule.sheet_headers,
+    sheet_columns_to_clear: `${columnMap[clearStartHeader]}:${columnMap[clearEndHeader]}`,
     clear_sheet_content: true,
     clear_data_validations: true,
     processing_order: "BOTTOM_ROW_TO_TOP_ROW",

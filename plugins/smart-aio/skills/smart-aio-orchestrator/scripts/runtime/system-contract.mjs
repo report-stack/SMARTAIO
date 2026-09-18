@@ -1,6 +1,16 @@
 // Smart AIOの制作シート、台帳、出力形式を定義する正本ランタイム。
 import { createHash } from "node:crypto";
 import { buildStandardBasicInfoPrompt, buildStandardSiteTitlePrompt } from "./content-runtime.mjs";
+import {
+  STANDARD_ARTICLE_SHEET_COLUMNS,
+  mapArticleSheetUpdates,
+  normalizeArticleSheetHeaders,
+  resolveArticleSheetColumnMap,
+} from "./article-sheet-layout.mjs";
+
+export { STANDARD_ARTICLE_SHEET_COLUMNS } from "./article-sheet-layout.mjs";
+
+export const SMARTAIO_PRODUCTION_ROOT_URL = "https://drive.google.com/drive/folders/0AJAK01qgUBq4Uk9PVA";
 
 const BASIC_INFO_CELLS = Object.freeze({
   big_word: "C10",
@@ -51,39 +61,6 @@ export const SOURCE_REGISTER_HEADERS = Object.freeze([
   "登録者",
   "確認者",
   "最終更新日",
-]);
-
-export const STANDARD_ARTICLE_SHEET_COLUMNS = Object.freeze([
-  "ピラー指定",
-  "記事作成依頼",
-  "記事ID",
-  "ピラー",
-  "記事タイトル",
-  "責任ラベル",
-  "記事詳細",
-  "記事カテゴリ",
-  "ハッシュタグ",
-  "JSON完成",
-  "JSON_URL",
-  "全部削除",
-  "記事完成",
-  "記事URL",
-  "記事&画像削除",
-  "画像完成",
-  "画像URL",
-  "画像のみ削除",
-  "タイトルスラッグ",
-  "WordPressURL",
-  "構造化完成",
-  "構造化URL",
-  "図解完成",
-  "図解URL",
-  "内部リンク状態",
-  "内部リンク最終確認日",
-  "内部リンク管理URL",
-  "リライト状態",
-  "最終リライト日",
-  "リライト管理URL",
 ]);
 
 export const STANDARD_CLUSTER_SHEET_COLUMNS = Object.freeze([
@@ -140,7 +117,7 @@ export const SYSTEM_FEATURES = Object.freeze([
   Object.freeze({ id: "article-image-provenance-gate", content_entry: "PIL・テンプレート由来画像を記事画像として拒否", command: "verify-article-visual-persistence", status: "IMPLEMENTED", requires: Object.freeze(["APP_IMAGE_GENERATION", "GOOGLE_DRIVE_WRITE", "GOOGLE_SHEETS_WRITE"]) }),
   Object.freeze({ id: "article-diagram-image", content_entry: "図解画像を作成", command: "prepare-images / verify-article-visual-persistence", status: "IMPLEMENTED_CONNECTION_REQUIRED", requires: Object.freeze(["APP_IMAGE_GENERATION", "GOOGLE_DRIVE_WRITE", "GOOGLE_SHEETS_WRITE"]) }),
   Object.freeze({ id: "structured-markup-output", content_entry: "構造化マークアップ出力物とWordPressコピペ用ファイルを出力", command: "build-structured-markup / verify-structured-markup", status: "IMPLEMENTED", requires: Object.freeze(["GOOGLE_DRIVE_WRITE", "GOOGLE_SHEETS_WRITE"]) }),
-  Object.freeze({ id: "internal-link-graph", content_entry: "記事同士の内部リンク網を作成し記事一覧に実URLを表示", command: "plan-internal-link-graph / prepare-internal-link-sheet-output / verify-internal-link-graph", status: "IMPLEMENTED", requires: Object.freeze(["GOOGLE_SHEETS_READ", "GOOGLE_DRIVE_WRITE"]) }),
+  Object.freeze({ id: "internal-link-graph", content_entry: "記事同士の内部リンク網を作成し記事一覧の公開URLを正本にして実URLを表示", command: "plan-internal-link-graph / prepare-internal-link-sheet-output / verify-internal-link-graph", status: "IMPLEMENTED", requires: Object.freeze(["GOOGLE_SHEETS_READ", "GOOGLE_DRIVE_WRITE"]) }),
   Object.freeze({ id: "ranking-based-auto-rewrite", content_entry: "順位・反応データから自動リライト案を作成", command: "prepare-rewrite-plan", status: "IMPLEMENTED_APPROVAL_GATED", requires: Object.freeze(["RANKING_DATA", "GOOGLE_DRIVE_WRITE", "GOOGLE_SHEETS_WRITE"]) }),
   Object.freeze({ id: "rewrite-artifact-output-policy", content_entry: "リライト成果物を元記事フォルダー内の連番フォルダーで3点管理", command: "prepare-rewrite-artifact-output", status: "IMPLEMENTED", requires: Object.freeze(["GOOGLE_DRIVE_WRITE", "GOOGLE_SHEETS_WRITE"]) }),
   Object.freeze({ id: "multi-article-batch", content_entry: "複数記事を一括作成・停止・再開", command: "create-batch / batch-next / apply-batch-step / fail-batch-step / stop-batch / resume-batch", status: "IMPLEMENTED", requires: Object.freeze(["GOOGLE_DRIVE_WRITE", "GOOGLE_SHEETS_WRITE", "SCHEDULED_TASK_FOR_UNATTENDED_RUN"]) }),
@@ -471,11 +448,16 @@ export function prepareClientProductionSheet(input) {
   if (parsedDriveUrl.hostname !== "drive.google.com" || !parsedDriveUrl.pathname.includes("/folders/")) {
     throw new Error("CLIENT_DRIVE_FOLDER_URL_REQUIRED");
   }
+  if (clientDriveUrl === SMARTAIO_PRODUCTION_ROOT_URL) {
+    throw new Error("CLIENT_DRIVE_FOLDER_MUST_NOT_BE_SMARTAIO_ROOT");
+  }
   return Object.freeze({
     client_id: clientId,
     client_name: clientName,
     status: "READY_FOR_CLIENT_PRODUCTION_SHEET",
     workbook_name: `${clientId}_${clientName.replace(`${clientId}_`, "")}_記事制作シート`,
+    smartaio_root_url: SMARTAIO_PRODUCTION_ROOT_URL,
+    client_folder_parent_url: SMARTAIO_PRODUCTION_ROOT_URL,
     client_drive_url: clientDriveUrl,
     folder_structure: CLIENT_FOLDER_STRUCTURE,
     folders_not_created: REMOVED_CLIENT_FOLDERS,
@@ -549,7 +531,7 @@ export function validateClientProductionSheet(input) {
   }
   const actualSheets = normalizeHeaders(input.sheet_names);
   const missingSheets = STANDARD_CLIENT_WORKBOOK_SHEETS.filter((name) => !actualSheets.includes(name));
-  const articleColumns = normalizeHeaders(input.article_headers);
+  const articleColumns = normalizeArticleSheetHeaders(input.article_headers);
   const planConfirmationColumns = normalizeHeaders(input.plan_confirmation_headers ?? input.article_plan_confirmation_headers);
   const keywordColumns = normalizeHeaders(input.keyword_headers);
   const clusterColumns = normalizeHeaders(input.cluster_headers);
@@ -592,16 +574,19 @@ export function prepareClientArticleSheetUpdate(input) {
       throw new Error("ARTICLE_ID_REBIND_FORBIDDEN");
     }
   }
+  const columnMap = resolveArticleSheetColumnMap(input.article_headers);
+  const leadingBlank = columnMap["ピラー指定"] === "B";
   const row = STANDARD_ARTICLE_SHEET_COLUMNS.map((column) => {
     if (column === "記事ID") return articleId;
     return values[column] ?? null;
   });
+  if (leadingBlank) row.unshift(null);
   return Object.freeze({
     client_id: clientId,
     article_id: articleId,
     production_sheet_url: spreadsheetUrl,
     sheet_name: "記事一覧",
-    columns: STANDARD_ARTICLE_SHEET_COLUMNS,
+    columns: Object.freeze(leadingBlank ? ["", ...STANDARD_ARTICLE_SHEET_COLUMNS] : [...STANDARD_ARTICLE_SHEET_COLUMNS]),
     row: Object.freeze(row),
     central_management_update: "INDEX_AUDIT_ONLY",
     duplicate_check_source: "SAME_CLIENT_PRODUCTION_SHEET_ONLY",
@@ -1015,18 +1000,45 @@ export function prepareStandardArticleRecordUpdate(input) {
   if (!articleId.startsWith("ID-")) throw new Error("STANDARD_ARTICLE_ID_REQUIRED");
   const sheetData = input.sheet_data || {};
   const jsonData = { ...(input.json_data || {}) };
+  const articleDetail = requireText(
+    sheetData.articleDetail ?? sheetData.article_detail ?? sheetData["記事詳細"] ?? jsonData.article_detail ?? jsonData.summary,
+    "article_detail",
+  );
+  const metaDescription = requireText(
+    sheetData.metaDescription ?? sheetData.meta_description ?? sheetData["メタディスクリプション"] ?? jsonData.meta_description ?? articleDetail,
+    "meta_description",
+  );
+  if (articleDetail !== metaDescription) throw new Error("ARTICLE_DETAIL_META_DESCRIPTION_MUST_MATCH");
   const merged = {
     id: String(sheetData.id || articleId),
     category: String(sheetData.category || ""),
     title: String(sheetData.title || ""),
     responsibilityLabel: String(sheetData.responsibilityLabel || ""),
+    articleDetail,
+    metaDescription,
   };
-  Object.assign(jsonData, merged);
+  Object.assign(jsonData, {
+    id: merged.id,
+    category: merged.category,
+    title: merged.title,
+    responsibilityLabel: merged.responsibilityLabel,
+    summary: articleDetail,
+    article_detail: articleDetail,
+    meta_description: metaDescription,
+  });
+  const sheetValuesByHeader = Object.freeze({
+    "ピラー": merged.category,
+    "記事タイトル": merged.title,
+    "責任ラベル": merged.responsibilityLabel,
+    "記事詳細": articleDetail,
+    "メタディスクリプション": metaDescription,
+  });
   return Object.freeze({
     client_id: clientId,
     article_id: articleId,
     status: "READY_FOR_ARTICLE_RECORD_UPDATE",
-    sheet_columns_D_to_G: Object.freeze([merged.id, merged.category, merged.title, merged.responsibilityLabel]),
+    sheet_values_by_header: sheetValuesByHeader,
+    sheet_updates: mapArticleSheetUpdates(sheetValuesByHeader, input.article_headers),
     json_file_name: `${articleId}.json`,
     json_content: `${JSON.stringify(jsonData, null, 2)}\n`,
     execution_rule: "Update the row and the JSON file together. Do not change another client or article folder.",
@@ -1201,6 +1213,11 @@ function extractRenderedTagSection(taggedContent) {
   return normalizeStandardHashtags(items.join(","));
 }
 
+function hasForbiddenVisibleTagOrSourceSection(taggedContent) {
+  const normalized = normalizeStandardTaggedText(String(taggedContent || ""));
+  return /\[(?:H2|H3|P)\]\s*(?:タグ(?:一覧)?|出典(?:一覧)?|主な出典|参考(?:情報|文献|資料)|参照元)\s*\[\/(?:H2|H3|P)\]/.test(normalized);
+}
+
 function extractStandardListItems(section = "") {
   return Array.from(String(section).matchAll(/\[LI\]([\s\S]*?)\[\/LI\]/g), (match) =>
     removeStandardBlockTags(match[1]).replace(/\{\{SOFTBREAK\}\}/g, "\n").trim());
@@ -1239,8 +1256,8 @@ function validateStandardArticleStructure(taggedContent) {
   const articleLength = removeStandardBlockTags(content).replace(/\s/g, "").length;
   if (articleLength < 4000 || articleLength > 6000) errors.push("ARTICLE_CHARACTER_COUNT_MUST_BE_4000_TO_6000");
 
-  if (!/\[H2\]この記事のまとめ\[\/H2\][\s\S]*?\[H2\]Q&A\[\/H2\][\s\S]*?\[H2\]タグ\[\/H2\]/.test(normalized)) {
-    errors.push("ARTICLE_SUMMARY_QA_TAG_SECTION_ORDER_REQUIRED");
+  if (!/\[H2\]この記事のまとめ\[\/H2\][\s\S]*?\[H2\]Q&A\[\/H2\]/.test(normalized)) {
+    errors.push("ARTICLE_SUMMARY_QA_ORDER_REQUIRED");
   }
   const qaItems = Array.from(content.matchAll(/\[P\]\s*\[B\]Q：[^\[]+?\[\/B\]\s*\r?\nA：[\s\S]*?\[\/P\]/g));
   if (qaItems.length !== 5) errors.push("ARTICLE_QA_EXACTLY_FIVE_REQUIRED");
@@ -1266,8 +1283,7 @@ export function prepareStandardDocumentOutput(input) {
   if (!/\[H1\][\s\S]+?\[\/H1\]/.test(content)) errors.push("H1_TAG_REQUIRED");
   if (!content.includes("[H2]この記事の要約[/H2]")) errors.push("SUMMARY_SECTION_REQUIRED");
   if (!expectedHashtags) errors.push("EXPECTED_HASHTAGS_REQUIRED");
-  if (!renderedHashtags) errors.push("TAG_SECTION_REQUIRED");
-  if (expectedHashtags && renderedHashtags && renderedHashtags !== expectedHashtags) errors.push("TAG_SECTION_HASHTAGS_MISMATCH");
+  if (renderedHashtags || hasForbiddenVisibleTagOrSourceSection(content)) errors.push("VISIBLE_TAG_OR_SOURCE_SECTION_FORBIDDEN");
   if (/(^|\n)#{1,6}\s|<\/?(?:h[1-6]|p|ul|li|strong)\b/i.test(content)) errors.push("MARKDOWN_OR_HTML_NOT_ALLOWED");
   errors.push(...structureValidation.errors);
   const renderPlan = renderStandardTaggedContent(content);
@@ -1279,7 +1295,11 @@ export function prepareStandardDocumentOutput(input) {
     errors: Object.freeze(errors),
     document_title: `${clientId}_${articleId}_${title}`,
     article_folder_url: requireText(input.article_folder_url, "article_folder_url"),
-    sheet_updates_after_save: Object.freeze({ N: String(input.completed_on || new Date().toISOString().slice(0, 10)).replaceAll("-", "/"), O: "DOCUMENT_URL", P: false }),
+    sheet_updates_after_save: mapArticleSheetUpdates({
+      "記事完成": String(input.completed_on || new Date().toISOString().slice(0, 10)).replaceAll("-", "/"),
+      "記事URL": "DOCUMENT_URL",
+      "記事&画像削除": false,
+    }, input.article_headers),
     style: Object.freeze({ h2_color: "#cc0000", h3_color: "#0b5394", marker_color: "#fff2cc", diagram_source_color: "#d9ead3" }),
     render_plan: renderPlan,
     google_doc_output_requirements: Object.freeze({
@@ -1306,12 +1326,22 @@ export function prepareStandardDocumentOutput(input) {
       marker_count: Object.freeze({ min: 2, max: 4 }),
       article_character_count: Object.freeze({ min: 4000, max: 6000 }),
       qa_count: 5,
-      editorial_ending_order: Object.freeze(["この記事のまとめ", "Q&A", "タグ"]),
+      editorial_ending_order: Object.freeze(["この記事のまとめ", "Q&A", "関連記事"]),
+      tag_section_visible_forbidden: true,
+      source_section_visible_forbidden: true,
+      related_articles_after_qa: Object.freeze({
+        label: "関連記事",
+        label_must_not_use_heading_style: true,
+        links_are_article_titles: true,
+        native_links_required: true,
+      }),
     }),
     article_metadata: Object.freeze({
       hashtags: expectedHashtags,
       rendered_hashtags: renderedHashtags,
-      tag_section_required: true,
+      tag_section_required: false,
+      tag_section_visible_forbidden: true,
+      source_section_visible_forbidden: true,
       diagram_source_sections: diagramSourceSections,
       article_length: structureValidation.article_length,
       marker_count: structureValidation.marker_count,

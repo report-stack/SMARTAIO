@@ -3,6 +3,7 @@ import {
   verifyContentPromptRegistry,
 } from "../../../content-prompts/scripts/content_prompt_registry.mjs";
 import { createHash } from "node:crypto";
+import { mapArticleSheetUpdates } from "./article-sheet-layout.mjs";
 
 const DEFAULT_IMAGE_SIZE = "1536x1024";
 const TITLE_IMAGE_COUNT = 1;
@@ -376,13 +377,13 @@ export async function prepareStandardImageSet(input) {
     output_plan: Object.freeze({
       article_folder_url: String(input.article_folder_url || "").trim() || "ARTICLE_FOLDER_URL",
       image_folder_url: String(input.image_folder_url || "").trim() || "IMAGE_FOLDER_URL",
-      sheet_updates_after_save: Object.freeze({
-        Q: String(input.completed_on || new Date().toISOString().slice(0, 10)).replaceAll("-", "/"),
-        R: "IMAGE_FOLDER_URL",
-        S: false,
-        W: String(input.completed_on || new Date().toISOString().slice(0, 10)).replaceAll("-", "/"),
-        X: "DIAGRAM_FILE_URL",
-      }),
+      sheet_updates_after_save: mapArticleSheetUpdates({
+        "画像完成": String(input.completed_on || new Date().toISOString().slice(0, 10)).replaceAll("-", "/"),
+        "画像URL": "IMAGE_FOLDER_URL",
+        "画像のみ削除": false,
+        "図解完成": String(input.completed_on || new Date().toISOString().slice(0, 10)).replaceAll("-", "/"),
+        "図解URL": "DIAGRAM_FILE_URL",
+      }, input.article_headers),
     }),
     completion_gate: Object.freeze({
       status: "IMAGE_GENERATION_REQUIRED",

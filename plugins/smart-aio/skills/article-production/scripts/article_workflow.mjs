@@ -12,6 +12,7 @@ import {
   TITLE_REFINEMENT_PROMPT,
   TITLE_REFINEMENT_VERSION,
 } from "./title_quality.mjs";
+import { mapArticleSheetUpdates } from "../../smart-aio-orchestrator/scripts/runtime/article-sheet-layout.mjs";
 
 export { analyzeTitleQuality, TITLE_REFINEMENT_VERSION } from "./title_quality.mjs";
 
@@ -19,6 +20,37 @@ function requireText(value, name) {
   const text = value === undefined || value === null ? "" : String(value).trim();
   if (!text) throw new TypeError(`${name} is required`);
   return text;
+}
+
+function firstNonEmpty(...values) {
+  return values.map((value) => String(value ?? "").trim()).find(Boolean) || "";
+}
+
+function requirePublicArticleUrl(value, field) {
+  const text = requireText(value, field);
+  let parsed;
+  try {
+    parsed = new URL(text);
+  } catch {
+    throw new Error(`${field.toUpperCase()}_INVALID`);
+  }
+  if (!new Set(["http:", "https:"]).has(parsed.protocol)) throw new Error(`${field.toUpperCase()}_INVALID`);
+  if (parsed.hostname === "drive.google.com" || parsed.hostname === "docs.google.com") {
+    throw new Error(`${field.toUpperCase()}_MUST_BE_PUBLIC_ARTICLE_URL`);
+  }
+  parsed.hash = "";
+  return parsed.toString();
+}
+
+function resolveArticlePublicUrl(article = {}) {
+  const publicUrl = firstNonEmpty(article.public_url, article["公開URL"]);
+  if (publicUrl) return Object.freeze({ url: requirePublicArticleUrl(publicUrl, "internal_link_public_url"), source: "公開URL" });
+  const wordPressUrl = firstNonEmpty(article.wordpress_url, article.WordPressURL, article["WordPressURL"]);
+  if (wordPressUrl) return Object.freeze({ url: requirePublicArticleUrl(wordPressUrl, "internal_link_wordpress_url"), source: "WordPressURL" });
+  if (firstNonEmpty(article.article_url, article["記事URL"], article.url, article.canonical_url)) {
+    throw new Error("INTERNAL_LINK_ARTICLE_URL_FORBIDDEN");
+  }
+  throw new Error("INTERNAL_LINK_PUBLIC_URL_REQUIRED");
 }
 
 function normalizeArticleCategoryRegistry(articleCategories = []) {
@@ -428,8 +460,9 @@ export function selectInternalLinkCandidates({ client_id, candidate, existingArt
   const candidateText = [candidate.title, candidate.category, candidate.basicInfo?.searchIntent, candidate.deepDive?.conclusion].filter(Boolean).join(" ");
 
   return existingArticles
-    .filter((article) => article.article_id !== candidate.article_id && article.url)
+    .filter((article) => article.article_id !== candidate.article_id)
     .map((article) => {
+      const target = resolveArticlePublicUrl(article);
       const targetText = [article.title, article.category, article.searchIntent, article.conclusionSummary].filter(Boolean).join(" ");
       const contentScore = similarity(candidateText, targetText);
       const categoryBoost = candidate.category && article.category === candidate.category ? 0.2 : 0;
@@ -437,10 +470,18 @@ export function selectInternalLinkCandidates({ client_id, candidate, existingArt
         client_id: clientId,
         target_article_id: article.article_id,
         target_title: article.title,
-        target_url: article.url,
+        target_url: target.url,
+        target_url_source: target.source,
         anchor_text: article.title,
         score: Number(Math.min(1, contentScore + categoryBoost).toFixed(3)),
         reason: categoryBoost ? "同一カテゴリかつ内容が関連" : "記事内容が関連",
+        placement_policy: "RELATED_ARTICLES_AFTER_QA_REQUIRED",
+        placement: Object.freeze({
+          type: "RELATED_ARTICLES_AFTER_QA",
+          after_qa: true,
+          section_label: "関連記事",
+          section_is_heading: false,
+        }),
       };
     })
     .filter((item) => item.score > 0)
@@ -842,11 +883,8 @@ function appendHashtagOutputRules(prompt, hashtags) {
   if (!formatted) return prompt;
   return `${prompt}
 
-# 記事タグ表示ルール（新システム追加ルール）
-本文の終盤に次のタグセクションを1回だけ入れてください。出典セクションがある場合は、出典の直前に置いてください。
-
-[H2]タグ[/H2]
-[P]${formatted}[/P]`;
+# 記事タグ管理ルール（新システム追加ルール）
+ハッシュタグは記事制作シートと管理JSONへ記録するための管理情報です。Googleドキュメント本文には「タグ」「出典」「参考情報」セクションを出力しないでください。Q&Aの後には、別工程でHタグなしの「関連記事」を追加します。`;
 }
 
 function nextStandardArticleNumber({ start_row, previous_article_id, last_article_id }) {
@@ -922,11 +960,17 @@ export async function finalizeStandardArticleIdeaOutput(input) {
   const articleCategory = articleCategoryResolution.status === "RESOLVED" ? articleCategoryResolution.name : String(idea.articleCategory || "");
   const articleCategorySlug = articleCategoryResolution.status === "RESOLVED" ? articleCategoryResolution.slug : String(idea.articleCategorySlug || "");
   const slug = normalizeStandardSlug(idea.slug);
+  const metaDescription = requireText(
+    idea.meta_description ?? idea.metaDescription ?? idea.article_detail ?? idea.articleDetail ?? idea.summary,
+    "meta_description",
+  );
   const jsonData = {
     id: articleId,
     category: idea.category || "",
     title: idea.title || "",
-    summary: idea.summary || "",
+    summary: metaDescription,
+    article_detail: metaDescription,
+    meta_description: metaDescription,
     slug,
     responsibilityLabel: normalizeResponsibilityLabel(idea.responsibilityLabel),
     basicInfo: {
@@ -967,19 +1011,20 @@ export async function finalizeStandardArticleIdeaOutput(input) {
     json_file_name: `${articleId}.json`,
     json_content: `${JSON.stringify(jsonData, null, 2)}\n`,
     sheet_row: Number(input.start_row || 3),
-    sheet_updates: Object.freeze({
-      D: articleId,
-      E: jsonData.category,
-      F: jsonData.title,
-      G: jsonData.responsibilityLabel,
-      H: false,
-      I: articleCategory,
-      J: cleanedHashtags,
-      K: completedOn,
-      L: "JSON_FILE_URL",
-      M: false,
-      T: slug,
-    }),
+    sheet_updates: mapArticleSheetUpdates({
+      "記事ID": articleId,
+      "ピラー": jsonData.category,
+      "記事タイトル": jsonData.title,
+      "責任ラベル": jsonData.responsibilityLabel,
+      "記事詳細": metaDescription,
+      "メタディスクリプション": metaDescription,
+      "記事カテゴリ": articleCategory,
+      "ハッシュタグ": cleanedHashtags,
+      "JSON完成": completedOn,
+      "JSON_URL": "JSON_FILE_URL",
+      "全部削除": false,
+      "タイトルスラッグ": slug,
+    }, input.article_headers),
     prompt_version: articlePrompt.prompt_version,
     prompt_key: articlePrompt.prompt_key,
     prompt_sha256: articlePrompt.prompt_sha256,

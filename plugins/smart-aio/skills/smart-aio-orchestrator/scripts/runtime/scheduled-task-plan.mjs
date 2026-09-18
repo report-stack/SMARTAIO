@@ -65,7 +65,7 @@ function reportTaskRecord({ clientId, reportTask, timeZone, status }) {
       output_format: reportTask.output_format,
       output_folder_name: reportTask.output_folder_name,
       output: "PERFORMANCE_REPORT",
-      required_sources: Object.freeze(["記事一覧", "実行履歴", "レビュー", "順位・分析", "WordPressURL"]),
+      required_sources: Object.freeze(["記事一覧", "実行履歴", "レビュー", "順位・分析", "公開URL"]),
       record_index_in_management_sheet: true,
     }),
     external_execution_allowed: false,

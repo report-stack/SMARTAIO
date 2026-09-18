@@ -41,9 +41,9 @@
 
 `content_prompt` は `assembly-rules.json` の `article-writing` 規則で組み立てる。`context_packet` は新システムの一次情報、内部リンク候補、重複判定、公式サイト重複に対する利用者の選択であり、保護プロンプト本文へ結合しない。
 
-`finalize-idea` は `publication_plan` に登録済み記事カテゴリ、カテゴリスラッグ、記事スラッグを返す。`publication_site_url` と `permalink_structure` がある場合だけ想定URLを組み立てる。サイトURLが未設定なら `PUBLICATION_SITE_URL_REQUIRED`、パーマリンク構造が未設定なら `PERMALINK_STRUCTURE_REQUIRED` とし、推測URLを作らない。WordPress投稿後の正式URLを最終的な正本とする。ハッシュタグは記事制作シートの `ハッシュタグ`、記事ID JSONの `basicInfo.hashtags`、Googleドキュメント本文の「タグ」セクションで一致させる。Googleドキュメント本文はWordPressコピペ用の装飾済み本文として作り、制作用の `[H1]`、`[P]`、`[UL]`、`[LI]`、`[MARK]`、`[DIAGRAM]` などのタグ文字列を可視テキストとして残してはならない。Markdown本文をそのまま貼った `##` 見出し、Markdown表、URLだけの段落、裸URLの内部リンク、通常段落の番号リストだけで作った疑似箇条書きも禁止する。`[DIAGRAM]` はタグ内の元文章を本文にそのまま残し、図解化した箇所として背景色で示す。図解元は通常の本文段落として自然に読める文章にし、短文・項目の羅列や「図解：〜」などのキャプションだけへ置き換えてはならない。図解元本文は図解の読み方や意図の説明文ではなく、図解画像にした内容そのものを本文として述べ、本文と図解の項目・順序・意味を一致させる。
+`finalize-idea` は `publication_plan` に登録済み記事カテゴリ、カテゴリスラッグ、記事スラッグを返す。`publication_site_url` と `permalink_structure` がある場合だけ想定URLを組み立てる。サイトURLが未設定なら `PUBLICATION_SITE_URL_REQUIRED`、パーマリンク構造が未設定なら `PERMALINK_STRUCTURE_REQUIRED` とし、推測URLを作らない。WordPress投稿後の正式URLを最終的な正本とする。ハッシュタグは記事制作シートの `ハッシュタグ` と記事ID JSONの `basicInfo.hashtags` で一致させ、Googleドキュメント本文には「タグ」「出典」「参考情報」セクションを出さない。Googleドキュメント本文はWordPressコピペ用の装飾済み本文として作り、制作用の `[H1]`、`[P]`、`[UL]`、`[LI]`、`[MARK]`、`[DIAGRAM]` などのタグ文字列を可視テキストとして残してはならない。Markdown本文をそのまま貼った `##` 見出し、Markdown表、URLだけの段落、裸URLの内部リンク、通常段落の番号リストだけで作った疑似箇条書きも禁止する。Q&A直後にはHタグなしの「関連記事」ラベルを置き、対象記事タイトルへネイティブリンクを付ける。`[DIAGRAM]` はタグ内の元文章を本文にそのまま残し、図解化した箇所として背景色で示す。図解元は通常の本文段落として自然に読める文章にし、短文・項目の羅列や「図解：〜」などのキャプションだけへ置き換えてはならない。図解元本文は図解の読み方や意図の説明文ではなく、図解画像にした内容そのものを本文として述べ、本文と図解の項目・順序・意味を一致させる。
 
-記事本文・JSON・Googleドキュメントに加えて、`build-structured-markup` で `{記事ID}_schema.jsonld` を作成し、`03_記事/{記事ID}` へ保存する。構造化マークアップは `Article` と `BreadcrumbList` を必須にし、本文にFAQがある場合は `FAQPage`、手順記事の場合は `HowTo` を追加する。`Article.author` は `@type=Organization` とし、`name` には基本情報のプロフィールウィジェット用編集部名を入れる。`publisher` は含めない。`verify-structured-markup` でファイル名、Drive URL、記事フォルダー所属、シート再読込を確認できない場合は完成報告へ進めない。
+記事本文・JSON・Googleドキュメントに加えて、`build-structured-markup` で `{記事ID}_schema.jsonld` を作成し、`03_記事/{記事ID}` へ保存する。構造化マークアップは `Article`、`BreadcrumbList`、本文Q&A 5件と同じ順序・同じ内容の `FAQPage` を必須にし、手順記事の場合は `HowTo` を追加する。`Article.description` は記事一覧の `メタディスクリプション` と完全一致させ、`Article.mainEntityOfPage` は記事一覧の `公開URL` と完全一致させる。`Article.author` は `@type=Organization` とし、`name` には基本情報のプロフィールウィジェット用編集部名を入れる。`publisher`、`keywords`、アイキャッチ画像用の `image` は含めない。`verify-structured-markup` でファイル名、Drive URL、記事フォルダー所属、シート再読込を確認できない場合は完成報告へ進めない。
 
 リライトは `prepare-rewrite-plan` で順位低下、クリック減、表示回数減、検索意図変化から候補を自動抽出する。候補抽出と下書き作成は自動化対象にできるが、既存公開記事の更新・WordPress反映は `FINAL_APPROVAL` または別途の更新承認がある場合だけ許可する。順位データがない記事を計測済みとして扱わず、別顧客の順位データを使わない。
 
@@ -53,9 +53,9 @@
 |---|---|---|
 | `KW_RESEARCH` | KW候補、検索実測、読者の疑問 | 実測日と根拠がある |
 | `OUTLINE_AI_REVIEW` | 独自性、結論、見出し、根拠計画 | 作成と別のAIによる`OUTLINE`レビュー合格 |
-| `DRAFTING` | 本文、保護プロンプト版・SHA-256、タグセクション | `DRAFT`レビュー合格、Doc出力前検査でタグセクションとハッシュタグ本文が企画タグと一致し、Google Docs出力時に制作用タグがネイティブ装飾へ変換され、Markdown見出し・Markdown表・裸URL段落が0件である |
+| `DRAFTING` | 本文、保護プロンプト版・SHA-256、タグ・出典セクション0件 | `DRAFT`レビュー合格、Doc出力前検査でタグ・出典セクションが出力されず、Google Docs出力時に制作用タグがネイティブ装飾へ変換され、Markdown見出し・Markdown表・裸URL段落が0件である |
 | `FACT_CHECK` | 数値・固有名詞・主張の確認、出典 | 作成と別の実行で未確認主張0件 |
-| `FINISHING` | 内部リンク網、構造化マークアップ、図解画像、タイトル画像1枚、記事内写真3枚 | `verify-internal-link-graph`、`verify-structured-markup`、タイトル画像1枚・通常画像3枚のPNG・1536x1024・`{記事ID}_1.png`〜`{記事ID}_4.png` と図解PNG・1536x1024・`{記事ID}_diagram_1.png` を実生成し、タイトル画像は記事タイトル文字を許可しつつ背景の読める文字をできるだけ避け、通常画像3枚も読める文字をできるだけ避ける指示と確認証拠を持ち、この文字抑制ルールは図解画像に適用せず、図解元が自然な本文段落としてDoc内で色付けされ、その本文が図解内容そのものであり、その直後に図解画像が置かれ、本文と図解の項目・順序・意味の一致証拠、1枚目のタイトル表示証跡を持ち、Driveと記事一覧の `画像完成`・`画像URL`・`図解完成`・`図解URL` を再読込した `image_persistence` が合格し、作成と別のAIによる`FINAL`レビュー合格 |
+| `FINISHING` | 関連記事リンク、構造化マークアップ、図解画像、タイトル画像1枚、記事内写真3枚 | `verify-internal-link-graph`、`verify-structured-markup`、タイトル画像1枚・通常画像3枚のPNG・1536x1024・`{記事ID}_1.png`〜`{記事ID}_4.png` と図解PNG・1536x1024・`{記事ID}_diagram_1.png` を実生成し、内部リンクはQ&A直後のHタグなし「関連記事」配下の記事タイトルリンクとして検証し、構造化マークアップに `keywords` とアイキャッチ画像用 `image` がなく、タイトル画像は記事タイトル文字を許可しつつ背景の読める文字をできるだけ避け、通常画像3枚も読める文字をできるだけ避ける指示と確認証拠を持ち、この文字抑制ルールは図解画像に適用せず、図解元が自然な本文段落としてDoc内で色付けされ、その本文が図解内容そのものであり、その直後に図解画像が置かれ、本文と図解の項目・順序・意味の一致証拠、1枚目のタイトル表示証跡を持ち、Driveと記事一覧の `画像完成`・`画像URL`・`図解完成`・`図解URL` を再読込した `image_persistence` が合格し、作成と別のAIによる`FINAL`レビュー合格 |
 | `AWAITING_FINAL_APPROVAL` | 完成物、AIレビュー結果、公開予定情報 | 人が同じ記事・版へ`FINAL_APPROVAL`を記録 |
 
 `FINISHING` の図解は、作成と異なる評価 `run_id` と評価モデルを記録し、`inspection_method=ORIGINAL_IMAGE_VISUAL_INSPECTION` で原寸確認する。保存対象SHA一致、ID-00012相当の基準比較、品質85点以上、画面利用65〜95%、タイトルまたは文脈見出し、補足文、視線誘導、情報階層、読める日本語、誤字なし、判断結果または結論、低密度でない、単純ラベル列でない、本文忠実性、著作権安全性をすべて合格させる。未達時は `FINISHING` に留め、別SHAへ再生成する。

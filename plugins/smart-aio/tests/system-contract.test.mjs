@@ -11,10 +11,14 @@ import {
 } from "../skills/content-prompts/scripts/content_prompt_registry.mjs";
 import {
   STANDARD_ARTICLE_SHEET_COLUMNS,
+  STANDARD_CLIENT_WORKBOOK_SHEETS,
+  STANDARD_CLUSTER_SHEET_COLUMNS,
+  STANDARD_KEYWORD_SHEET_COLUMNS,
   STANDARD_PLAN_CONFIRMATION_SHEET_COLUMNS,
   prepareClientNewsSettingsTemplate,
   prepareClientProductionSheet,
   prepareClientSourceRegister,
+  prepareStandardArticleRecordUpdate,
   prepareStandardDocumentOutput,
   prepareStandardClientOnboarding,
   resolveActiveClientRegistration,
@@ -27,11 +31,13 @@ import {
   allocateStandardArticleId,
   finalizeStandardArticleIdeaOutput,
   prepareArticleRun,
+  selectInternalLinkCandidates,
   validateStandardArticleIdeaOutput,
 } from "../skills/article-production/scripts/article_workflow.mjs";
 import { normalizeApprovalDecision } from "../skills/smart-aio-orchestrator/scripts/runtime/approval-gate.mjs";
 import { ARTICLE_PRODUCTION_STAGES } from "../skills/smart-aio-orchestrator/scripts/runtime/article-production-lifecycle.mjs";
 import { prepareArticleCompletionReport } from "../skills/smart-aio-orchestrator/scripts/runtime/completion-report.mjs";
+import { createDeletionPlan } from "../skills/smart-aio-orchestrator/scripts/runtime/deletion-plan.mjs";
 import { SMART_AIO_PLUGIN_VERSION } from "../skills/smart-aio-orchestrator/scripts/runtime/version.mjs";
 import {
   evaluateStageReview,
@@ -58,6 +64,7 @@ import {
   verifyStructuredMarkupOutput,
 } from "../skills/smart-aio-orchestrator/scripts/runtime/content-optimization.mjs";
 import { verifyArticleVisualPersistence } from "../skills/smart-aio-orchestrator/scripts/runtime/image-persistence.mjs";
+import { reviewArticle } from "../skills/article-quality-review/scripts/review_article.mjs";
 
 const pluginRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const blockedExpressions = [
@@ -124,6 +131,14 @@ test("production sheet contract rejects embedded sheet scripts", () => {
     openai_api_calls: false,
     operation: "SMART_AIO_SKILLS_ONLY",
   });
+  assert.equal(plan.smartaio_root_url, "https://drive.google.com/drive/folders/0AJAK01qgUBq4Uk9PVA");
+  assert.equal(plan.client_folder_parent_url, plan.smartaio_root_url);
+  assert.notEqual(plan.client_drive_url, plan.smartaio_root_url);
+  assert.throws(() => prepareClientProductionSheet({
+    client_id: "C001",
+    client_name: "C001_Example",
+    client_drive_url: "https://drive.google.com/drive/folders/0AJAK01qgUBq4Uk9PVA",
+  }), /CLIENT_DRIVE_FOLDER_MUST_NOT_BE_SMARTAIO_ROOT/);
   const validation = validateClientProductionSheet({
     client_id: "C001",
     production_sheet_url: "https://docs.google.com/spreadsheets/d/example/edit",
@@ -138,6 +153,9 @@ test("production sheet contract rejects embedded sheet scripts", () => {
 });
 
 test("article sheet tracks rewrite and internal link state with dates and management URLs", () => {
+  assert.ok(STANDARD_ARTICLE_SHEET_COLUMNS.includes("メタディスクリプション"));
+  assert.ok(STANDARD_ARTICLE_SHEET_COLUMNS.includes("公開URL"));
+  assert.ok(STANDARD_ARTICLE_SHEET_COLUMNS.indexOf("公開URL") < STANDARD_ARTICLE_SHEET_COLUMNS.indexOf("WordPressURL"));
   assert.deepEqual(STANDARD_ARTICLE_SHEET_COLUMNS.slice(-6), [
     "内部リンク状態",
     "内部リンク最終確認日",
@@ -152,6 +170,56 @@ test("article sheet tracks rewrite and internal link state with dates and manage
     client_drive_url: "https://drive.google.com/drive/folders/example",
   });
   assert.deepEqual(plan.sheets.記事一覧.columns, STANDARD_ARTICLE_SHEET_COLUMNS);
+
+  const workbookPath = join(pluginRoot, "assets", "Smart_AIO_クライアント別記事制作シート_テンプレート.xlsx");
+  const articleSheetXml = execFileSync("unzip", ["-p", workbookPath, "xl/worksheets/sheet3.xml"], { encoding: "utf8" });
+  assert.match(articleSheetXml, /sqref="B3:B102"/);
+  assert.doesNotMatch(articleSheetXml, /sqref="C3:C102"/);
+  assert.doesNotMatch(articleSheetXml, /sqref="H3:H102"/);
+});
+
+test("article sheet writes resolve by header for the live leading-blank layout", async () => {
+  const liveHeaders = ["", ...STANDARD_ARTICLE_SHEET_COLUMNS];
+  const confirmedInput = validArticleIdeaInput({
+    article_headers: liveHeaders,
+    completed_on: "2026-09-16",
+    article_plan_confirmation: {
+      confirmed: true,
+      client_id: "C001",
+      title: "AIO対策は診断から始める｜企業サイト改善の7つの確認項目",
+      article_category: "AIO対策",
+      hashtags: "#AIO対策 #AI検索対策",
+      user_id: "user-1",
+      plan_confirmation_sheet: planConfirmationSheetEvidence(),
+    },
+  });
+  const validation = validateStandardArticleIdeaOutput(confirmedInput);
+  const finalized = await finalizeStandardArticleIdeaOutput({ ...confirmedInput, validation });
+  assert.equal(finalized.sheet_updates.D, "ID-00001");
+  assert.equal(finalized.sheet_updates.H, confirmedInput.ideas[0].summary);
+  assert.equal(finalized.sheet_updates.I, confirmedInput.ideas[0].summary);
+  assert.equal(finalized.sheet_updates.U, confirmedInput.ideas[0].slug);
+
+  const validationResult = validateClientProductionSheet({
+    client_id: "C001",
+    production_sheet_url: "https://docs.google.com/spreadsheets/d/example/edit",
+    sheet_names: STANDARD_CLIENT_WORKBOOK_SHEETS,
+    article_headers: liveHeaders,
+    plan_confirmation_headers: STANDARD_PLAN_CONFIRMATION_SHEET_COLUMNS,
+    keyword_headers: STANDARD_KEYWORD_SHEET_COLUMNS,
+    cluster_headers: STANDARD_CLUSTER_SHEET_COLUMNS,
+  });
+  assert.equal(validationResult.status, "CLIENT_PRODUCTION_SHEET_VALID");
+
+  const deletion = createDeletionPlan({
+    client_id: "C001",
+    target_type: "DOCUMENTS_AND_IMAGES",
+    article_ids: ["ID-00001"],
+    parent_drive_url: "https://drive.google.com/drive/folders/example",
+    article_headers: liveHeaders,
+  });
+  assert.equal(deletion.selection_checkbox_column, "Q");
+  assert.equal(deletion.sheet_columns_to_clear, "O:T");
 });
 
 test("production sheet includes client plan confirmation gate", () => {
@@ -646,7 +714,16 @@ test("article idea validation and article preparation require user plan confirma
   assert.equal(validation.plan_confirmation.confirmation_source, "PLAN_CONFIRMATION_SHEET");
   const finalized = await finalizeStandardArticleIdeaOutput({ ...confirmedInput, validation });
   assert.equal(finalized.status, "READY_FOR_ARTICLE_ID_FOLDER_AND_JSON_OUTPUT");
+  assert.equal(finalized.sheet_updates.C, "ID-00001");
+  assert.equal(finalized.sheet_updates.D, "AIO対策");
+  assert.equal(finalized.sheet_updates.E, confirmedInput.ideas[0].title);
+  assert.equal(finalized.sheet_updates.F, confirmedInput.ideas[0].responsibilityLabel);
+  assert.equal(finalized.sheet_updates.G, confirmedInput.ideas[0].summary);
+  assert.equal(finalized.sheet_updates.H, confirmedInput.ideas[0].summary);
   assert.equal(finalized.sheet_updates.J, "AIO対策,AI検索対策");
+  const finalizedJson = JSON.parse(finalized.json_content);
+  assert.equal(finalizedJson.article_detail, confirmedInput.ideas[0].summary);
+  assert.equal(finalizedJson.meta_description, confirmedInput.ideas[0].summary);
 
   const article = {
     client_id: "C001",
@@ -715,6 +792,59 @@ test("article idea validation and article preparation require user plan confirma
   assert.equal(prepared.status, "READY_FOR_CHAT_GENERATION");
 });
 
+test("article record updates keep article detail and meta description identical", () => {
+  const detail = "AIO対策の基本と確認手順を整理した記事。";
+  const responsibilityLabel = "AIO基本｜AIO理解｜基礎確認,検索意図,引用設計,運用確認｜関連記事,公開確認";
+  const updated = prepareStandardArticleRecordUpdate({
+    client_id: "C001",
+    article_id: "ID-00001",
+    sheet_data: {
+      category: "AIO対策",
+      title: "AIO対策の基本",
+      responsibilityLabel,
+      article_detail: detail,
+      meta_description: detail,
+    },
+    json_data: { id: "ID-00001" },
+  });
+  assert.deepEqual(updated.sheet_values_by_header, {
+    "ピラー": "AIO対策",
+    "記事タイトル": "AIO対策の基本",
+    "責任ラベル": responsibilityLabel,
+    "記事詳細": detail,
+    "メタディスクリプション": detail,
+  });
+  assert.deepEqual(updated.sheet_updates, { D: "AIO対策", E: "AIO対策の基本", F: responsibilityLabel, G: detail, H: detail });
+
+  const liveUpdated = prepareStandardArticleRecordUpdate({
+    client_id: "C001",
+    article_id: "ID-00001",
+    article_headers: ["", ...STANDARD_ARTICLE_SHEET_COLUMNS],
+    sheet_data: {
+      category: "AIO対策",
+      title: "AIO対策の基本",
+      responsibilityLabel,
+      articleDetail: detail,
+      metaDescription: detail,
+    },
+  });
+  assert.equal(liveUpdated.sheet_updates.E, "AIO対策");
+  assert.equal(liveUpdated.sheet_updates.H, detail);
+  assert.equal(liveUpdated.sheet_updates.I, detail);
+  assert.equal(JSON.parse(updated.json_content).meta_description, detail);
+  assert.throws(() => prepareStandardArticleRecordUpdate({
+    client_id: "C001",
+    article_id: "ID-00001",
+    sheet_data: {
+      category: "AIO対策",
+      title: "AIO対策の基本",
+      responsibilityLabel,
+      article_detail: "記事詳細",
+      meta_description: "異なる説明",
+    },
+  }), /ARTICLE_DETAIL_META_DESCRIPTION_MUST_MATCH/);
+});
+
 function validTaggedArticleContent({ includeTags = true } = {}) {
   const bodyParagraph = "表示料率だけで結論を出さず、適用条件、対象外条件、契約画面の実際の料率、月次請求まで順番に確認すると、店舗に合う費用判断を進めやすくなります。";
   const body = Array.from({ length: 48 }, () => `[P]${bodyParagraph}[/P]`).join("\n");
@@ -737,8 +867,6 @@ ${body}
 [H2]手数料確認を5段階で進める[/H2]
 [P][DIAGRAM]表示料率、適用条件、対象外業種、契約情報、月次確認の順に確認すると、導入前後の費用判断を一つの流れで整理できます。[/DIAGRAM][/P]
 [P][MARK]契約後も管理画面と請求内容を毎月照合し、想定した費用との差を確認してください。[/MARK][/P]
-[H2]参考情報[/H2]
-[P]利用時点の公式ページと契約画面を確認し、適用条件の変更や自店固有の契約内容を反映します。[/P]
 [H2]この記事のまとめ[/H2]
 [UL]
 [LI]表示料率と適用条件を分けて確認します。[/LI]
@@ -777,29 +905,36 @@ test("article idea and document output require the complete article format", () 
     ...baseDocument,
     tagged_content: validTaggedArticleContent({ includeTags: false }),
   });
-  assert.equal(withoutTags.status, "RETRY_REQUIRED");
-  assert.ok(withoutTags.errors.includes("TAG_SECTION_REQUIRED"));
+  assert.equal(withoutTags.status, "READY_FOR_GOOGLE_DOC_OUTPUT");
 
   const withTags = prepareStandardDocumentOutput({
     ...baseDocument,
     tagged_content: validTaggedArticleContent(),
   });
-  assert.equal(withTags.status, "READY_FOR_GOOGLE_DOC_OUTPUT");
-  assert.equal(withTags.article_metadata.hashtags, "AIO対策,AI検索対策");
-  assert.equal(withTags.article_metadata.rendered_hashtags, "AIO対策,AI検索対策");
-  assert.deepEqual(withTags.article_metadata.diagram_source_sections, ["表示料率、適用条件、対象外業種、契約情報、月次確認の順に確認すると、導入前後の費用判断を一つの流れで整理できます。"]);
-  assert.equal(withTags.article_metadata.marker_count, 2);
-  assert.equal(withTags.article_metadata.qa_count, 5);
-  assert.ok(withTags.article_metadata.article_length >= 4000 && withTags.article_metadata.article_length <= 6000);
-  assert.equal(withTags.render_plan.diagram_source_color, "#d9ead3");
-  assert.ok(withTags.render_plan.blocks.some((block) => block.decorations?.some((decoration) => decoration.type === "DIAGRAM_SOURCE")));
-  const keyPointList = withTags.render_plan.blocks.find((block, index, blocks) =>
+  assert.equal(withTags.status, "RETRY_REQUIRED");
+  assert.ok(withTags.errors.includes("VISIBLE_TAG_OR_SOURCE_SECTION_FORBIDDEN"));
+  const withReferenceHeading = prepareStandardDocumentOutput({
+    ...baseDocument,
+    tagged_content: `${validTaggedArticleContent({ includeTags: false })}\n[H2]参考文献[/H2]\n[P]非表示にすべき出典情報[/P]`,
+  });
+  assert.ok(withReferenceHeading.errors.includes("VISIBLE_TAG_OR_SOURCE_SECTION_FORBIDDEN"));
+  assert.equal(withoutTags.article_metadata.hashtags, "AIO対策,AI検索対策");
+  assert.equal(withoutTags.article_metadata.rendered_hashtags, "");
+  assert.equal(withoutTags.article_metadata.tag_section_required, false);
+  assert.equal(withoutTags.article_metadata.tag_section_visible_forbidden, true);
+  assert.deepEqual(withoutTags.article_metadata.diagram_source_sections, ["表示料率、適用条件、対象外業種、契約情報、月次確認の順に確認すると、導入前後の費用判断を一つの流れで整理できます。"]);
+  assert.equal(withoutTags.article_metadata.marker_count, 2);
+  assert.equal(withoutTags.article_metadata.qa_count, 5);
+  assert.ok(withoutTags.article_metadata.article_length >= 4000 && withoutTags.article_metadata.article_length <= 6000);
+  assert.equal(withoutTags.render_plan.diagram_source_color, "#d9ead3");
+  assert.ok(withoutTags.render_plan.blocks.some((block) => block.decorations?.some((decoration) => decoration.type === "DIAGRAM_SOURCE")));
+  const keyPointList = withoutTags.render_plan.blocks.find((block, index, blocks) =>
     block.type === "LI_GROUP" && blocks[index - 1]?.text === "この記事でわかること");
   assert.ok(keyPointList.items.every((item) => !item.text.startsWith("・")));
 
   const invalidStructure = prepareStandardDocumentOutput({
     ...baseDocument,
-    tagged_content: validTaggedArticleContent()
+    tagged_content: validTaggedArticleContent({ includeTags: false })
       .replace("[P]PAYGATEの手数料は", "[H2]誤った冒頭[/H2]\n[P]PAYGATEの手数料は")
       .replace(/\[MARK\][\s\S]*?\[\/MARK\]/g, "マーカーなし"),
   });
@@ -808,7 +943,7 @@ test("article idea and document output require the complete article format", () 
   assert.ok(invalidStructure.errors.includes("ARTICLE_MARKER_COUNT_MUST_BE_TWO_TO_FOUR"));
 });
 
-test("stage review requires Doc tag section only for final output", () => {
+test("stage review requires related articles and tag/source absence for final output", () => {
   const base = {
     client_id: "C001",
     article_id: "ID-00001",
@@ -839,7 +974,7 @@ test("stage review requires Doc tag section only for final output", () => {
       visual_assets: { title_image: "ID-00001_1.png" },
       article_category: "AIO対策",
       hashtags: "AIO対策,AI検索対策",
-      rendered_tag_section: "#AIO対策 #AI検索対策",
+      related_articles_section: "関連記事",
     },
     mechanical_checks: [
       { key: "typos", passed: true },
@@ -862,7 +997,8 @@ test("stage review requires Doc tag section only for final output", () => {
   };
   const finalResult = evaluateStageReview(finalInput);
   assert.equal(finalResult.status, "REVISE");
-  assert.ok(finalResult.missing_mechanical_checks.includes("tag_section"));
+  assert.ok(finalResult.missing_mechanical_checks.includes("related_articles_section"));
+  assert.ok(finalResult.missing_mechanical_checks.includes("tag_and_source_sections_absent"));
 });
 
 test("source register rejects populated initialization and alternate creation", () => {
@@ -915,12 +1051,23 @@ function completionReportFixture(overrides = {}) {
   const articleFolderUrl = "https://drive.google.com/drive/folders/article-folder";
   const imageFolderUrl = "https://drive.google.com/drive/folders/image-folder";
   const productionSheetUrl = "https://docs.google.com/spreadsheets/d/sheet123/edit";
+  const faqItems = Array.from({ length: 5 }, (_, index) => ({
+    question: `Q${index + 1}：AIO対策の確認項目${index + 1}は何ですか？`,
+    answer: `A${index + 1}：確認項目${index + 1}を本文の責任範囲内で整理し、公開前に根拠と表現を見直します。`,
+  }));
   return {
     client_id: "CLUTCH",
     article_id: articleId,
     smart_aio_plugin_version: SMART_AIO_PLUGIN_VERSION,
     title: "AIO対策は施策より先に診断",
-    hashtags: "#AIO対策 #生成AI検索 #コンテンツ設計",
+    meta_description: "AIO対策の初期診断記事",
+    public_url: "https://example.com/aio-diagnosis/",
+    public_url_sheet_readback: {
+      reloaded_after_write: true,
+      column_name: "公開URL",
+      value: "https://example.com/aio-diagnosis/",
+    },
+    body_faq_items: faqItems,
     document_url: `https://docs.google.com/document/d/${documentId}/edit`,
     drive_folder_url: articleFolderUrl,
     image_folder_url: imageFolderUrl,
@@ -955,12 +1102,14 @@ function completionReportFixture(overrides = {}) {
       bare_url_paragraph_count: 0,
       article_length: 4300,
       key_points_count: 3,
-      rendered_hashtags: "#AIO対策 #生成AI検索 #コンテンツ設計",
       has_key_points_section: true,
       has_article_summary_section: true,
       has_conclusion_section: true,
       has_qa_section: true,
-      has_tag_section: true,
+      has_tag_section: false,
+      has_source_section: false,
+      has_related_articles_section: true,
+      related_articles_section_is_heading: false,
       heading_order_verified: true,
       native_heading_styles_verified: true,
       native_bullets_verified: true,
@@ -990,17 +1139,25 @@ function completionReportFixture(overrides = {}) {
       internal_links: [{
         anchor_text: "AIO対策の基礎",
         target_url: "https://example.com/aio-basic/",
-        source_excerpt: "初めて診断項目を整理する場合は、先にAIO対策の基礎（https://example.com/aio-basic/）で全体像を確認しておくと判断しやすくなります。",
-        visible_text: "初めて診断項目を整理する場合は、先にAIO対策の基礎で全体像を確認しておくと判断しやすくなります。",
+        visible_text: "AIO対策の基礎",
         native_link_verified: true,
         bare_url_visible: false,
+        section_label: "関連記事",
+        after_qa: true,
+        section_is_heading: false,
       }],
+      wordpress_highlight_blocks: {
+        key_points: { block_count: 1, item_count: 3 },
+        article_summary: { block_count: 1, line_breaks_preserved: true },
+        conclusion_summary: { block_count: 1, line_breaks_preserved: true },
+        qa: { block_count: 5, qa_pair_per_block: true, separate_question_answer_blocks: false },
+      },
       reloaded_after_write: true,
     },
     drive_scope_evidence: {
       output_location: "SMARTAIO_DRIVE",
       smartaio_root_verified: true,
-      smartaio_root_url: "https://drive.google.com/drive/folders/smartaio-root",
+      smartaio_root_url: "https://drive.google.com/drive/folders/0AJAK01qgUBq4Uk9PVA",
       client_folder_directly_under_smartaio: true,
       client_drive_url: "https://drive.google.com/drive/folders/client-folder",
       article_folder_url: articleFolderUrl,
@@ -1183,6 +1340,17 @@ function completionReportFixture(overrides = {}) {
             "@type": "BreadcrumbList",
             itemListElement: [{ "@type": "ListItem", position: 1, name: "ホーム", item: "https://example.com/" }],
           },
+          {
+            "@type": "FAQPage",
+            mainEntity: faqItems.map((item) => ({
+              "@type": "Question",
+              name: item.question,
+              acceptedAnswer: {
+                "@type": "Answer",
+                text: item.answer,
+              },
+            })),
+          },
         ],
       },
     },
@@ -1198,11 +1366,10 @@ function completionReportFixture(overrides = {}) {
         anchor_text: "AIO対策の基礎",
         score: 0.82,
         placement: {
-          type: "CONTEXTUAL_BODY",
-          in_body: true,
-          section_heading: "AIO対策の初期診断",
-          source_excerpt: "初めて診断項目を整理する場合は、先にAIO対策の基礎（https://example.com/aio-basic/）で全体像を確認しておくと判断しやすくなります。",
-          natural_sentence_verified: true,
+          type: "RELATED_ARTICLES_AFTER_QA",
+          after_qa: true,
+          section_label: "関連記事",
+          section_is_heading: false,
         },
       }],
       reciprocal_update_plan: [{
@@ -1231,7 +1398,7 @@ function completionReportFixture(overrides = {}) {
         "outline_review_recorded",
         "article_document_saved",
         "article_document_format_verified",
-        "article_tags_rendered_in_document",
+        "article_tag_and_source_sections_absent",
         "article_json_saved",
         "structured_markup_saved",
         "structured_markup_verified",
@@ -1299,6 +1466,24 @@ test("completion report requires SMARTAIO Drive scope evidence", () => {
     })),
     /COMPLETION_REPORT_STANDARD_RUN_AUDIT_REQUIRED/,
   );
+  assert.throws(
+    () => prepareArticleCompletionReport(completionReportFixture({
+      drive_scope_evidence: {
+        ...completionReportFixture().drive_scope_evidence,
+        smartaio_root_url: "https://drive.google.com/drive/folders/wrong-root",
+      },
+    })),
+    /COMPLETION_REPORT_DRIVE_SCOPE_SMARTAIO_ROOT_URL_MISMATCH/,
+  );
+  assert.throws(
+    () => prepareArticleCompletionReport(completionReportFixture({
+      drive_scope_evidence: {
+        ...completionReportFixture().drive_scope_evidence,
+        client_drive_url: "https://drive.google.com/drive/folders/0AJAK01qgUBq4Uk9PVA",
+      },
+    })),
+    /COMPLETION_REPORT_DRIVE_SCOPE_CLIENT_FOLDER_MUST_NOT_BE_SMARTAIO_ROOT/,
+  );
 
   const result = prepareArticleCompletionReport(completionReportFixture());
   assert.equal(result.status, "READY_TO_REPORT_ARTICLE_COMPLETION");
@@ -1314,6 +1499,10 @@ test("completion report requires SMARTAIO Drive scope evidence", () => {
 
 test("completion report requires Google Doc readback markers images and links", () => {
   const fixture = completionReportFixture();
+  assert.throws(
+    () => prepareArticleCompletionReport(completionReportFixture({ public_url_sheet_readback: undefined })),
+    /COMPLETION_REPORT_PUBLIC_URL_SHEET_READBACK_REQUIRED/,
+  );
   assert.throws(
     () => prepareArticleCompletionReport(completionReportFixture({ article_document_readback: undefined })),
     /ARTICLE_DOCUMENT_READBACK_EVIDENCE_REQUIRED/,
@@ -1368,6 +1557,25 @@ test("completion report requires Google Doc readback markers images and links", 
   assert.equal(verified.internal_link_count, 1);
   assert.equal(verified.visible_markdown_heading_count, 0);
   assert.equal(verified.internal_links_native_hyperlinks_verified, true);
+  assert.equal(verified.wordpress_highlight_blocks.key_points.block_count, 1);
+  assert.equal(verified.wordpress_highlight_blocks.key_points.item_count, 3);
+  assert.equal(verified.wordpress_highlight_blocks.article_summary.line_breaks_preserved, true);
+  assert.equal(verified.wordpress_highlight_blocks.conclusion_summary.line_breaks_preserved, true);
+  assert.equal(verified.wordpress_highlight_blocks.qa.block_count, 5);
+  assert.equal(verified.wordpress_highlight_blocks.qa.qa_pair_per_block, true);
+
+  const firstArticle = verifyArticleDocumentReadbackEvidence({
+    ...fixture.article_document_readback,
+    existing_article_count: 0,
+    internal_link_count: 0,
+    internal_links: [],
+    has_related_articles_section: false,
+    related_articles_section_is_heading: false,
+    internal_links_native_hyperlinks_verified: false,
+  });
+  assert.equal(firstArticle.existing_article_count, 0);
+  assert.equal(firstArticle.internal_link_count, 0);
+  assert.equal(firstArticle.has_related_articles_section, false);
 });
 
 test("completion report rejects forged audit pass without raw checkpoint evidence", () => {
@@ -1401,7 +1609,7 @@ test("article document readback is bound to client article document and persiste
   }
 });
 
-test("article document readback requires explicit tags exact image identities and exact links", () => {
+test("article document readback requires absent tag/source sections, exact image identities, and related links", () => {
   const fixture = completionReportFixture();
   const missingTagCount = { ...fixture.article_document_readback };
   delete missingTagCount.visible_standard_tag_count;
@@ -1452,6 +1660,21 @@ test("article document readback requires explicit tags exact image identities an
     () => prepareArticleCompletionReport(completionReportFixture({ article_document_readback: bareUrlLink })),
     /ARTICLE_DOCUMENT_READBACK_INTERNAL_LINKS_1_BARE_URL_FORBIDDEN/,
   );
+
+  const splitKeyPoints = structuredClone(fixture.article_document_readback);
+  splitKeyPoints.wordpress_highlight_blocks.key_points.block_count = 3;
+  assert.throws(
+    () => verifyArticleDocumentReadbackEvidence(splitKeyPoints),
+    /ARTICLE_DOCUMENT_READBACK_WORDPRESS_HIGHLIGHT_BLOCK_KEY_POINTS_COUNT_MISMATCH/,
+  );
+
+  const splitQa = structuredClone(fixture.article_document_readback);
+  splitQa.wordpress_highlight_blocks.qa.block_count = 10;
+  splitQa.wordpress_highlight_blocks.qa.separate_question_answer_blocks = true;
+  assert.throws(
+    () => verifyArticleDocumentReadbackEvidence(splitQa),
+    /ARTICLE_DOCUMENT_READBACK_WORDPRESS_HIGHLIGHT_BLOCK_QA_COUNT_MISMATCH/,
+  );
 });
 
 test("standard client run audit catches skipped operational checkpoints", () => {
@@ -1483,7 +1706,7 @@ test("standard client run audit catches skipped operational checkpoints", () => 
       "article_category_and_tags_confirmed",
       "outline_review_recorded",
       "article_document_format_verified",
-      "article_tags_rendered_in_document",
+      "article_tag_and_source_sections_absent",
       "structured_markup_saved",
       "structured_markup_verified",
       "final_review_recorded",
@@ -1535,6 +1758,8 @@ test("weekly and monthly report plans summarize client-scoped production outcome
   assert.equal(report.output_contract.primary_artifact, "GOOGLE_DOC");
   assert.equal(report.output_contract.primary_link_label, "レポートGoogleドキュメント");
   assert.equal(report.output_contract.record_index_in_management_sheet, true);
+  assert.ok(report.required_sources.includes("公開URL"));
+  assert.ok(!report.required_sources.includes("WordPressURL"));
   assert.ok(report.markdown_lines.some((line) => line.includes("記事作成: 1件")));
   assert.ok(report.markdown_lines.some((line) => line.includes("出力形式: レポートGoogleドキュメント")));
 
@@ -1608,6 +1833,8 @@ test("standard scheduled task plan includes reports for any new client", () => {
   assert.equal(plan.tasks[2].payload.output_format, "GOOGLE_DOC");
   assert.equal(plan.tasks[2].payload.output_folder_name, "07_順位・分析");
   assert.equal(plan.tasks[2].payload.record_index_in_management_sheet, true);
+  assert.ok(plan.tasks[2].payload.required_sources.includes("公開URL"));
+  assert.ok(!plan.tasks[2].payload.required_sources.includes("WordPressURL"));
   assert.equal(plan.tasks[3].task_id, "C999_monthly_report");
   assert.equal(plan.tasks[3].status, "READY_TO_ENABLE");
   assert.equal(plan.tasks[3].external_execution_allowed, false);
@@ -1666,7 +1893,7 @@ test("internal link graph requires same-client links and reciprocal update plans
       title: "AIO対策のFAQ設計",
       category: "AIO対策",
       searchIntent: "FAQを使ってAI検索に引用されやすくしたい",
-      url: "https://example.com/aio-faq/",
+      public_url: "https://example.com/aio-faq/",
     },
     existing_articles: [{
       client_id: "C001",
@@ -1674,90 +1901,80 @@ test("internal link graph requires same-client links and reciprocal update plans
       title: "AIO対策の基礎",
       category: "AIO対策",
       searchIntent: "AIO対策の基本を知りたい",
-      url: "https://example.com/aio-basic/",
+      public_url: "https://example.com/aio-basic/",
+      url: "https://docs.google.com/document/d/drive-doc/edit",
     }],
   });
   assert.equal(plan.status, "INTERNAL_LINK_GRAPH_READY");
   assert.equal(plan.outbound_links.length, 1);
   assert.equal(plan.reciprocal_update_plan.length, 1);
-  assert.equal(plan.placement_policy, "本文末尾の関連記事ブロックではなく、本文中の自然な文脈へ挿入する。FINAL検証時は各リンクにplacement.source_excerptを必須にする。");
-
-  const placedLinks = plan.outbound_links.map((link) => ({
-    ...link,
-    placement: {
-      type: "CONTEXTUAL_BODY",
-      in_body: true,
-      section_heading: "FAQ設計の前提",
-      source_excerpt: "FAQの前提整理がまだ曖昧な場合は、AIO対策の基礎（https://example.com/aio-basic/）で全体像を確認してから設問を分けます。",
-      natural_sentence_verified: true,
-    },
-  }));
+  assert.equal(plan.placement_policy, "Q&Aの直後にHタグなしの「関連記事」ラベルを置き、対象記事タイトルへネイティブリンクを付ける。本文中のテキストリンク、タグ、出典セクションとしては出力しない。");
 
   const verified = verifyInternalLinkGraph({
     client_id: "C001",
     article_id: "ID-00002",
     existing_article_count: 1,
-    outbound_links: placedLinks,
+    outbound_links: plan.outbound_links,
     reciprocal_update_plan: plan.reciprocal_update_plan,
   });
   assert.equal(verified.status, "VERIFIED_INTERNAL_LINK_GRAPH");
-  assert.equal(verified.placement_policy, "CONTEXTUAL_BODY_ONLY");
-  assert.equal(verified.outbound_links[0].placement.doc_output_policy, "ANCHOR_TEXT_NATIVE_LINK_WITHOUT_BARE_URL_PARAGRAPH");
+  assert.equal(verified.placement_policy, "RELATED_ARTICLES_AFTER_QA_ONLY");
+  assert.equal(verified.outbound_links[0].placement.doc_output_policy, "TITLE_NATIVE_LINKS_UNDER_PLAIN_RELATED_ARTICLES_LABEL");
   const sheetOutput = prepareInternalLinkSheetOutput({
     internal_link_graph: {
       client_id: "C001",
       article_id: "ID-00002",
       existing_article_count: 1,
-      outbound_links: placedLinks,
+      outbound_links: plan.outbound_links,
       reciprocal_update_plan: plan.reciprocal_update_plan,
     },
     management_file_url: "https://drive.google.com/file/d/internal-link-json/view",
   });
   assert.equal(sheetOutput.status, "INTERNAL_LINK_SHEET_OUTPUT_READY");
-  assert.ok(sheetOutput.sheet_value.includes("本文内リンク1（公開前予定URL）: https://example.com/aio-basic/"));
-  assert.ok(sheetOutput.sheet_value.includes("設置文: FAQの前提整理がまだ曖昧な場合は、AIO対策の基礎（https://example.com/aio-basic/）で全体像を確認してから設問を分けます。"));
+  assert.ok(sheetOutput.sheet_value.includes("関連記事1（公開前予定URL）: AIO対策の基礎"));
+  assert.ok(sheetOutput.sheet_value.includes("表示位置: Q&A直後の「関連記事」（Hタグなし）"));
   assert.ok(sheetOutput.sheet_value.includes("戻しリンク予定1（公開前予定URL）: https://example.com/aio-faq/"));
   assert.throws(() => verifyInternalLinkGraph({
     client_id: "C001",
     article_id: "ID-00002",
     existing_article_count: 1,
+    outbound_links: plan.outbound_links.map((link) => ({ ...link, placement: { type: "CONTEXTUAL_BODY", in_body: true } })),
+    reciprocal_update_plan: plan.reciprocal_update_plan,
+  }), /CONTENT_OPTIMIZATION_INTERNAL_LINK_PLACEMENT_TYPE_INVALID/);
+  assert.throws(() => verifyInternalLinkGraph({
+    client_id: "C001",
+    article_id: "ID-00002",
+    existing_article_count: 1,
+    outbound_links: [{
+      ...plan.outbound_links[0],
+      placement: {
+        type: "RELATED_ARTICLES_AFTER_QA",
+        after_qa: true,
+        section_label: "関連記事",
+        section_is_heading: true,
+      },
+    }],
+    reciprocal_update_plan: plan.reciprocal_update_plan,
+  }), /CONTENT_OPTIMIZATION_RELATED_ARTICLES_HEADING_FORBIDDEN/);
+  assert.throws(() => verifyInternalLinkGraph({
+    client_id: "C001",
+    article_id: "ID-00002",
+    existing_article_count: 1,
+    outbound_links: [{
+      ...plan.outbound_links[0],
+      placement: {
+        type: "RELATED_ARTICLES_AFTER_QA",
+        section_label: "関連記事",
+        section_is_heading: false,
+      },
+    }],
+    reciprocal_update_plan: plan.reciprocal_update_plan,
+  }), /CONTENT_OPTIMIZATION_RELATED_ARTICLES_AFTER_QA_REQUIRED/);
+  assert.throws(() => verifyInternalLinkGraph({
+    client_id: "C001",
+    article_id: "ID-00002",
+    existing_article_count: 1,
     outbound_links: plan.outbound_links,
-    reciprocal_update_plan: plan.reciprocal_update_plan,
-  }), /CONTENT_OPTIMIZATION_INTERNAL_LINK_CONTEXTUAL_BODY_REQUIRED/);
-  assert.throws(() => verifyInternalLinkGraph({
-    client_id: "C001",
-    article_id: "ID-00002",
-    existing_article_count: 1,
-    outbound_links: [{
-      ...placedLinks[0],
-      placement: {
-        type: "CONTEXTUAL_BODY",
-        in_body: true,
-        source_excerpt: "FAQの前提整理がまだ曖昧な場合は、AIO対策の基礎（https://example.com/aio-basic/）で全体像を確認してから設問を分けます。",
-        natural_sentence_verified: false,
-      },
-    }],
-    reciprocal_update_plan: plan.reciprocal_update_plan,
-  }), /CONTENT_OPTIMIZATION_INTERNAL_LINK_NATURAL_SENTENCE_REQUIRED/);
-  assert.throws(() => verifyInternalLinkGraph({
-    client_id: "C001",
-    article_id: "ID-00002",
-    existing_article_count: 1,
-    outbound_links: [{
-      ...placedLinks[0],
-      placement: {
-        type: "CONTEXTUAL_BODY",
-        in_body: true,
-        source_excerpt: "関連記事: AIO対策の基礎（https://example.com/aio-basic/）",
-      },
-    }],
-    reciprocal_update_plan: plan.reciprocal_update_plan,
-  }), /CONTENT_OPTIMIZATION_INTERNAL_LINK_RECOMMENDATION_BLOCK_FORBIDDEN/);
-  assert.throws(() => verifyInternalLinkGraph({
-    client_id: "C001",
-    article_id: "ID-00002",
-    existing_article_count: 1,
-    outbound_links: placedLinks,
     reciprocal_update_plan: [],
   }), /CONTENT_OPTIMIZATION_RECIPROCAL_UPDATE_PLAN_REQUIRED/);
   assert.throws(() => planInternalLinkGraph({
@@ -1765,9 +1982,118 @@ test("internal link graph requires same-client links and reciprocal update plans
     article: { client_id: "C001", article_id: "ID-00002", title: "AIO対策", category: "AIO対策" },
     existing_articles: [{ client_id: "C002", article_id: "ID-00001", title: "別顧客", url: "https://example.com/other/" }],
   }), /CROSS_CLIENT_DATA_DETECTED/);
+  assert.throws(() => planInternalLinkGraph({
+    client_id: "C001",
+    article: { client_id: "C001", article_id: "ID-00002", title: "AIO対策", category: "AIO対策", public_url: "https://example.com/aio-faq/" },
+    existing_articles: [{ client_id: "C001", article_id: "ID-00001", title: "Drive Doc", WordPressURL: "https://docs.google.com/document/d/doc123/edit" }],
+  }), /CONTENT_OPTIMIZATION_EXISTING_ARTICLE_PUBLIC_URL_COMPAT_WORDPRESS_URL_MUST_BE_PUBLIC_ARTICLE_URL/);
+  assert.throws(() => planInternalLinkGraph({
+    client_id: "C001",
+    article: { client_id: "C001", article_id: "ID-00002", title: "AIO対策", category: "AIO対策", public_url: "https://example.com/aio-faq/" },
+    existing_articles: [{ client_id: "C001", article_id: "ID-00001", title: "Drive Doc", 記事URL: "https://docs.google.com/document/d/doc123/edit" }],
+  }), /CONTENT_OPTIMIZATION_EXISTING_ARTICLE_PUBLIC_URL_ARTICLE_URL_FORBIDDEN/);
+  assert.throws(() => planInternalLinkGraph({
+    client_id: "C001",
+    article: { client_id: "C001", article_id: "ID-00002", title: "AIO対策", category: "AIO対策", public_url: "https://example.com/aio-faq/" },
+    existing_articles: [{ client_id: "C001", article_id: "ID-00001", title: "公開URL未入力" }],
+  }), /CONTENT_OPTIMIZATION_INTERNAL_LINK_PUBLIC_URL_REQUIRED/);
+  assert.throws(() => planInternalLinkGraph({
+    client_id: "C001",
+    article: { client_id: "C001", article_id: "ID-00002", title: "AIO対策", category: "AIO対策", searchIntent: "AIO対策の基本を知りたい", public_url: "https://docs.google.com/document/d/doc123/edit" },
+    existing_articles: [{ client_id: "C001", article_id: "ID-00001", title: "AIO対策の基礎", category: "AIO対策", searchIntent: "AIO対策の基本を知りたい", public_url: "https://example.com/aio-basic/" }],
+  }), /CONTENT_OPTIMIZATION_ARTICLE_PUBLIC_URL_MUST_BE_PUBLIC_ARTICLE_URL/);
+});
+
+test("article preparation internal-link candidates use only public URL columns", () => {
+  const candidate = {
+    client_id: "C001",
+    article_id: "ID-00002",
+    title: "AIO対策のFAQ設計",
+    category: "AIO対策",
+  };
+  const links = selectInternalLinkCandidates({
+    client_id: "C001",
+    candidate,
+    existingArticles: [{
+      client_id: "C001",
+      article_id: "ID-00001",
+      title: "AIO対策の基礎",
+      category: "AIO対策",
+      public_url: "",
+      公開URL: "https://example.com/aio-basic/",
+      url: "https://docs.google.com/document/d/doc123/edit",
+    }],
+  });
+  assert.equal(links[0].target_url, "https://example.com/aio-basic/");
+  assert.equal(links[0].target_url_source, "公開URL");
+  assert.deepEqual(links[0].placement, {
+    type: "RELATED_ARTICLES_AFTER_QA",
+    after_qa: true,
+    section_label: "関連記事",
+    section_is_heading: false,
+  });
+  assert.throws(() => selectInternalLinkCandidates({
+    client_id: "C001",
+    candidate,
+    existingArticles: [{
+      client_id: "C001",
+      article_id: "ID-00001",
+      title: "AIO対策の基礎",
+      category: "AIO対策",
+      記事URL: "https://docs.google.com/document/d/doc123/edit",
+    }],
+  }), /INTERNAL_LINK_ARTICLE_URL_FORBIDDEN/);
+});
+
+test("article review accepts related article title links without visible URLs", () => {
+  const base = {
+    client_id: "C001",
+    article: {
+      client_id: "C001",
+      article_id: "ID-00002",
+      responsibilityLabel: "FAQ設計｜FAQ設計責任｜検索意図確認,質問整理,回答整理,構造化確認｜関連記事確認,公開前確認",
+    },
+    content: [
+      "FAQ設計責任を扱います。",
+      "検索意図確認、質問整理、回答整理、構造化確認を本文で扱います。",
+      "[H2]見出し[/H2]",
+      "[H2]Q&A[/H2]",
+      "関連記事",
+      "AIO対策の基礎",
+    ].join("\n"),
+    existingArticles: [],
+    sourceCatalog: [{ client_id: "C001", source_id: "S1", status: "approved" }],
+    sourcesUsed: [{ client_id: "C001", source_id: "S1" }],
+    internalLinksUsed: [{
+      client_id: "C001",
+      target_article_id: "ID-00001",
+      target_title: "AIO対策の基礎",
+      target_url: "https://example.com/aio-basic/",
+      anchor_text: "AIO対策の基礎",
+    }],
+    clientRules: { minimumCharacters: 20 },
+  };
+  const reviewed = reviewArticle(base);
+  assert.equal(reviewed.checks.find((check) => check.key === "internal_links").passed, true);
+
+  const misplaced = reviewArticle({
+    ...base,
+    content: base.content.replace("[H2]Q&A[/H2]\n関連記事", "関連記事\n[H2]Q&A[/H2]"),
+  });
+  assert.equal(misplaced.checks.find((check) => check.key === "internal_links").passed, false);
+
+  const bareUrlOnly = reviewArticle({
+    ...base,
+    content: base.content.replace("AIO対策の基礎", "https://example.com/aio-basic/"),
+  });
+  assert.equal(bareUrlOnly.checks.find((check) => check.key === "internal_links").passed, false);
 });
 
 test("structured markup output creates and verifies JSON-LD for article SEO", () => {
+  const faqItems = Array.from({ length: 5 }, (_, index) => ({
+    question: `FAQは必要ですか？${index + 1}`,
+    answer: `検索意図を整理できる場合は有効です。${index + 1}`,
+  }));
   const output = buildStructuredMarkupOutput({
     client_id: "C001",
     site: { url: "https://example.com/", name: "Example公式" },
@@ -1776,13 +2102,15 @@ test("structured markup output creates and verifies JSON-LD for article SEO", ()
       article_id: "ID-00002",
       title: "AIO対策のFAQ設計",
       description: "AIO対策でFAQを設計する手順を説明します。",
+      meta_description: "AIO対策でFAQを設計する手順を説明します。",
       profile_widget_author_name: "AIO対策ナビ編集部",
       category: "AIO対策",
       category_url: "https://example.com/category/aio/",
-      url: "https://example.com/aio-faq/",
+      public_url: "https://example.com/aio-faq/",
       date_modified: "2026-08-28",
       hashtags: "AIO対策,FAQ",
-      faq_items: [{ question: "FAQは必要ですか？", answer: "検索意図を整理できる場合は有効です。" }],
+      faq_items: faqItems,
+      body_faq_items: faqItems,
     },
   });
   assert.equal(output.status, "STRUCTURED_MARKUP_READY");
@@ -1795,6 +2123,8 @@ test("structured markup output creates and verifies JSON-LD for article SEO", ()
   const articleSchema = output.markup["@graph"].find((item) => item["@type"] === "Article");
   assert.equal(articleSchema.author.name, "AIO対策ナビ編集部");
   assert.equal("publisher" in articleSchema, false);
+  assert.equal("keywords" in articleSchema, false);
+  assert.equal("image" in articleSchema, false);
   const verified = verifyStructuredMarkupOutput({
     client_id: "C001",
     article_id: "ID-00002",
@@ -1805,9 +2135,80 @@ test("structured markup output creates and verifies JSON-LD for article SEO", ()
     wordpress_copy_file_in_article_folder: true,
     sheet_persistence: { reloaded_after_write: true, structured_url_label: "構造化JSON-LD コピペ用" },
     markup: output.markup,
-  });
+  }, { description: "AIO対策でFAQを設計する手順を説明します。", public_url: "https://example.com/aio-faq/", body_faq_items: faqItems });
   assert.equal(verified.status, "VERIFIED_STRUCTURED_MARKUP_OUTPUT");
   assert.ok(verified.schema_types.includes("Article"));
+  assert.ok(verified.schema_types.includes("FAQPage"));
+  assert.throws(() => verifyStructuredMarkupOutput({
+    client_id: "C001",
+    article_id: "ID-00002",
+    file_name: output.file_name,
+    file_url: "https://drive.google.com/file/d/schema-file/view",
+    wordpress_copy_file_url: "https://drive.google.com/file/d/schema-copy/view",
+    file_in_article_folder: true,
+    wordpress_copy_file_in_article_folder: true,
+    sheet_persistence: { reloaded_after_write: true, structured_url_label: "構造化JSON-LD コピペ用" },
+    markup: output.markup,
+  }, { public_url: "https://example.com/another-article/" }), /CONTENT_OPTIMIZATION_ARTICLE_MAIN_ENTITY_OF_PAGE_MISMATCH/);
+  assert.throws(() => verifyStructuredMarkupOutput({
+    client_id: "C001",
+    article_id: "ID-00002",
+    file_name: output.file_name,
+    file_url: "https://drive.google.com/file/d/schema-file/view",
+    wordpress_copy_file_url: "https://drive.google.com/file/d/schema-copy/view",
+    file_in_article_folder: true,
+    wordpress_copy_file_in_article_folder: true,
+    sheet_persistence: { reloaded_after_write: true, structured_url_label: "構造化JSON-LD コピペ用" },
+    markup: output.markup,
+  }, { body_faq_items: faqItems.map((item, index) => index === 0 ? { ...item, answer: "本文と異なる回答" } : item) }), /CONTENT_OPTIMIZATION_FAQ_SCHEMA_MUST_MATCH_BODY_QA/);
+  assert.throws(() => buildStructuredMarkupOutput({
+    client_id: "C001",
+    site: { url: "https://example.com/", name: "Example公式" },
+    article: {
+      client_id: "C001",
+      article_id: "ID-00002",
+      title: "AIO対策のFAQ設計",
+      description: "スキーマ側だけ違う説明です。",
+      meta_description: "AIO対策でFAQを設計する手順を説明します。",
+      profile_widget_author_name: "AIO対策ナビ編集部",
+      public_url: "https://example.com/aio-faq/",
+      date_modified: "2026-08-28",
+      faq_items: faqItems,
+      body_faq_items: faqItems,
+    },
+  }), /CONTENT_OPTIMIZATION_DESCRIPTION_MUST_MATCH_META_DESCRIPTION_COLUMN/);
+  assert.throws(() => buildStructuredMarkupOutput({
+    client_id: "C001",
+    site: { url: "https://example.com/", name: "Example公式" },
+    article: {
+      client_id: "C001",
+      article_id: "ID-00002",
+      title: "AIO対策のFAQ設計",
+      description: "AIO対策でFAQを設計する手順を説明します。",
+      meta_description: "AIO対策でFAQを設計する手順を説明します。",
+      profile_widget_author_name: "AIO対策ナビ編集部",
+      public_url: "https://docs.google.com/document/d/doc123/edit",
+      date_modified: "2026-08-28",
+      faq_items: faqItems,
+      body_faq_items: faqItems,
+    },
+  }), /CONTENT_OPTIMIZATION_ARTICLE_PUBLIC_URL_MUST_BE_PUBLIC_ARTICLE_URL/);
+  assert.throws(() => buildStructuredMarkupOutput({
+    client_id: "C001",
+    site: { url: "https://example.com/", name: "Example公式" },
+    article: {
+      client_id: "C001",
+      article_id: "ID-00002",
+      title: "AIO対策のFAQ設計",
+      description: "AIO対策でFAQを設計する手順を説明します。",
+      meta_description: "AIO対策でFAQを設計する手順を説明します。",
+      profile_widget_author_name: "AIO対策ナビ編集部",
+      public_url: "https://example.com/aio-faq/",
+      date_modified: "2026-08-28",
+      faq_items: faqItems.slice(0, 4),
+      body_faq_items: faqItems,
+    },
+  }), /CONTENT_OPTIMIZATION_FAQ_EXACTLY_FIVE_REQUIRED/);
   assert.throws(() => verifyStructuredMarkupOutput({
     client_id: "C001",
     article_id: "ID-00002",
@@ -1830,6 +2231,64 @@ test("structured markup output creates and verifies JSON-LD for article SEO", ()
     sheet_persistence: { reloaded_after_write: true, structured_url_label: "構造化JSON-LD" },
     markup: output.markup,
   }), /CONTENT_OPTIMIZATION_STRUCTURED_SHEET_COPY_LABEL_REQUIRED/);
+  assert.throws(() => verifyStructuredMarkupOutput({
+    client_id: "C001",
+    article_id: "ID-00002",
+    file_name: "ID-00002_schema.jsonld",
+    file_url: "https://drive.google.com/file/d/schema-file/view",
+    wordpress_copy_file_url: "https://drive.google.com/file/d/schema-copy/view",
+    file_in_article_folder: true,
+    wordpress_copy_file_in_article_folder: true,
+    sheet_persistence: { reloaded_after_write: true, structured_url_label: "構造化JSON-LD コピペ用" },
+    markup: {
+      ...output.markup,
+      "@graph": output.markup["@graph"].map((item) => item["@type"] === "Article" ? { ...item, keywords: ["AIO"], image: "https://example.com/eye-catch.png" } : item),
+    },
+  }), /CONTENT_OPTIMIZATION_ARTICLE_KEYWORDS_FORBIDDEN/);
+  assert.throws(() => verifyStructuredMarkupOutput({
+    client_id: "C001",
+    article_id: "ID-00002",
+    file_name: output.file_name,
+    file_url: "https://drive.google.com/file/d/schema-file/view",
+    wordpress_copy_file_url: "https://drive.google.com/file/d/schema-copy/view",
+    file_in_article_folder: true,
+    wordpress_copy_file_in_article_folder: true,
+    sheet_persistence: { reloaded_after_write: true, structured_url_label: "構造化JSON-LD コピペ用" },
+    markup: {
+      ...output.markup,
+      "@graph": output.markup["@graph"].map((item) => item["@type"] === "Article" ? { ...item, publisher: { "@type": "Organization", name: "Example" } } : item),
+    },
+  }), /CONTENT_OPTIMIZATION_ARTICLE_PUBLISHER_FORBIDDEN/);
+  assert.throws(() => verifyStructuredMarkupOutput({
+    client_id: "C001",
+    article_id: "ID-00002",
+    file_name: output.file_name,
+    file_url: "https://drive.google.com/file/d/schema-file/view",
+    wordpress_copy_file_url: "https://drive.google.com/file/d/schema-copy/view",
+    file_in_article_folder: true,
+    wordpress_copy_file_in_article_folder: true,
+    sheet_persistence: { reloaded_after_write: true, structured_url_label: "構造化JSON-LD コピペ用" },
+    markup: {
+      ...output.markup,
+      "@graph": output.markup["@graph"].map((item) => item["@type"] === "Article" ? { ...item, image: "https://example.com/eye-catch.png" } : item),
+    },
+  }), /CONTENT_OPTIMIZATION_ARTICLE_IMAGE_FORBIDDEN/);
+  assert.throws(() => buildStructuredMarkupOutput({
+    client_id: "C001",
+    site: { url: "https://example.com/", name: "Example公式" },
+    article: {
+      client_id: "C001",
+      article_id: "ID-00002",
+      title: "AIO対策のFAQ設計",
+      description: "AIO対策でFAQを設計する手順を説明します。",
+      meta_description: "AIO対策でFAQを設計する手順を説明します。",
+      profile_widget_author_name: "AIO対策ナビ編集部",
+      article_url: "https://example.com/old-article-url/",
+      date_modified: "2026-08-28",
+      faq_items: faqItems,
+      body_faq_items: faqItems,
+    },
+  }), /CONTENT_OPTIMIZATION_ARTICLE_PUBLIC_URL_ARTICLE_URL_FORBIDDEN/);
 });
 
 test("standard image set plans one title image, three article photos, and one diagram", async () => {
@@ -1849,6 +2308,10 @@ test("standard image set plans one title image, three article photos, and one di
   assert.equal(plan.article_photo_count, 3);
   assert.equal(plan.image_count, 4);
   assert.equal(plan.total_visual_count, 5);
+  assert.equal(plan.output_plan.sheet_updates_after_save.Y.length, 10);
+  assert.equal(plan.output_plan.sheet_updates_after_save.Z, "DIAGRAM_FILE_URL");
+  assert.equal(plan.output_plan.sheet_updates_after_save.W, undefined);
+  assert.equal(plan.output_plan.sheet_updates_after_save.X, undefined);
   assert.equal(plan.images[0].image_role, "TITLE_IMAGE");
   assert.equal(plan.images[0].title_text, "AIO対策は施策より先に診断");
   assert.match(plan.images[0].prepared_prompt_sha256, /^[a-f0-9]{64}$/);

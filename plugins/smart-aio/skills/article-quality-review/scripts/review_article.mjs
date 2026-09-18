@@ -64,7 +64,17 @@ export function reviewArticle(input) {
     const catalogItem = sourceMap.get(String(source.source_id));
     return !catalogItem || !isApprovedSource(catalogItem, input.asOf);
   });
-  const invalidLinks = internalLinksUsed.filter((link) => !link.target_url || !content.includes(link.target_url));
+  const qaIndex = content.indexOf("Q&A");
+  const relatedArticlesIndex = content.indexOf("関連記事");
+  const invalidLinks = internalLinksUsed.filter((link) => {
+    const title = String(link.anchor_text ?? link.target_title ?? link.title ?? "").trim();
+    const titleIndex = title ? content.indexOf(title, Math.max(0, relatedArticlesIndex)) : -1;
+    return !link.target_url
+      || !title
+      || qaIndex < 0
+      || relatedArticlesIndex <= qaIndex
+      || titleIndex <= relatedArticlesIndex;
+  });
   const headingCount = countHeadings(content);
   const minimumCharacters = Number(input.clientRules?.minimumCharacters || 1000);
   const characterCount = [...content].length;
@@ -74,7 +84,7 @@ export function reviewArticle(input) {
     { key: "duplicate", passed: duplicateCheck.status === "CLEAR", critical: duplicateCheck.status === "BLOCKED", detail: duplicateCheck.status },
     { key: "responsibility", passed: missingResponsibilities.length === 0, critical: false, detail: missingResponsibilities },
     { key: "sources", passed: invalidSources.length === 0 && sourcesUsed.length > 0, critical: invalidSources.length > 0, detail: invalidSources.map((source) => source.source_id) },
-    { key: "internal_links", passed: invalidLinks.length === 0 && internalLinksUsed.length > 0, critical: false, detail: invalidLinks.map((link) => link.target_article_id) },
+    { key: "internal_links", passed: invalidLinks.length === 0 && (existingArticles.length === 0 || internalLinksUsed.length > 0), critical: false, detail: invalidLinks.map((link) => link.target_article_id) },
     verificationCheck("internal_link_graph", finalStage, () => verifyInternalLinkGraph(input.internal_link_graph, { client_id: clientId, article_id: article.article_id })),
     verificationCheck("structured_markup", finalStage, () => verifyStructuredMarkupOutput(input.structured_markup, { client_id: clientId, article_id: article.article_id })),
     verificationCheck("diagram_visual_quality", finalStage, () => verifyArticleVisualPersistence(input.image_persistence, { client_id: clientId, article_id: article.article_id })),
