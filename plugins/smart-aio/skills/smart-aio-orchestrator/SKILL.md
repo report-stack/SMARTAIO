@@ -31,7 +31,7 @@ Smart AIOに関する作業では、ファイル作成、ブラウザ操作、�
 
 ## 図解視覚品質ゲート
 
-図解は生成直後に作成と異なる `review_run_id` の評価役が評価モデルを記録し、`inspection_method=ORIGINAL_IMAGE_VISUAL_INSPECTION` で原寸確認してID-00012相当の基準画像と比較する。保存対象SHAと評価対象SHAを一致させ、品質点85以上、画面利用率65〜95%、タイトルまたは文脈見出し、補足文、視線誘導、情報階層、読める日本語、誤字なし、判断結果または結論、低密度でない、項目名とアイコンだけの単純列でない、本文忠実性、著作権安全性をすべて合格させる。欠損または不合格が1件でもあれば `IMAGE_PERSISTENCE_DIAGRAM_VISUAL_QUALITY_*` で停止し、別SHAの図解を再生成して再レビューする。合格前にDrive保存、`図解完成` 更新、`FINAL` 合格、完成報告へ進めない。
+図解は生成直後に作成と異なる `review_run_id` の評価役が評価モデルを記録し、`inspection_method=ORIGINAL_IMAGE_VISUAL_INSPECTION` で原寸確認し、[図解画像の制作・評価基準](../article-production/references/diagram-quality.md)に沿って評価する。保存対象SHAと評価対象SHAを一致させ、品質点85以上、画面利用率65〜95%、タイトルまたは文脈見出し、補足文、視線誘導、情報階層、読める日本語、誤字なし、判断結果または結論、低密度でない、項目名とアイコンだけの単純列でない、本文忠実性、著作権安全性をすべて合格させる。欠損または不合格が1件でもあれば `IMAGE_PERSISTENCE_DIAGRAM_VISUAL_QUALITY_*` で停止し、別SHAの図解を再生成して再レビューする。合格前にDrive保存、`図解完成` 更新、`FINAL` 合格、完成報告へ進めない。
 
 ## 標準フロー
 

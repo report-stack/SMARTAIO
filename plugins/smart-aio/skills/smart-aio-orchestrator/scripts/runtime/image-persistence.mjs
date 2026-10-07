@@ -12,7 +12,6 @@ const MINIMUM_TITLE_CANVAS_OCCUPANCY_PERCENT = 55;
 const MAXIMUM_TITLE_CANVAS_OCCUPANCY_PERCENT = 95;
 const REQUIRED_TITLE_VISUAL_CHECKS = Object.freeze([
   "original_image_inspected",
-  "benchmark_compared",
   "title_text_readable",
   "title_hierarchy_clear",
   "article_title_preserved",
@@ -24,7 +23,6 @@ const REQUIRED_TITLE_VISUAL_CHECKS = Object.freeze([
 ]);
 const REQUIRED_DIAGRAM_VISUAL_CHECKS = Object.freeze([
   "original_image_inspected",
-  "benchmark_compared",
   "topic_or_context_heading_present",
   "supporting_context_present",
   "reading_order_clear",
@@ -234,10 +232,6 @@ function normalizeTitleVisualQualityReview(reviewInput, titleSha256) {
     reviewer_model: requireText(reviewInput.reviewer_model, "title_visual_quality_reviewer_model"),
     inspection_method: inspectionMethod,
     reviewed_title_sha256: reviewedSha256,
-    benchmark_asset_id_or_url: requireText(
-      reviewInput.benchmark_asset_id_or_url ?? reviewInput.benchmark_reference,
-      "title_visual_quality_benchmark_reference",
-    ),
     visual_quality_score: score,
     canvas_occupancy_percent: canvasOccupancyPercent,
     checks: Object.freeze(Object.fromEntries(REQUIRED_TITLE_VISUAL_CHECKS.map((key) => [key, true]))),
@@ -347,10 +341,6 @@ function normalizeDiagramVisualQualityReview(reviewInput, diagramSha256) {
   if (reviewedSha256 !== diagramSha256) {
     throw new Error("IMAGE_PERSISTENCE_DIAGRAM_VISUAL_QUALITY_SHA_MISMATCH");
   }
-  const benchmarkReference = requireText(
-    reviewInput.benchmark_asset_id_or_url ?? reviewInput.benchmark_reference,
-    "diagram_visual_quality_benchmark_reference",
-  );
   const status = requireText(reviewInput.status, "diagram_visual_quality_status").toUpperCase();
   if (status !== "PASS") throw new Error("IMAGE_PERSISTENCE_DIAGRAM_VISUAL_QUALITY_REVIEW_NOT_PASS");
   const score = requireNumberInRange(reviewInput.visual_quality_score, "diagram_visual_quality_score", 0, 100);
@@ -384,7 +374,6 @@ function normalizeDiagramVisualQualityReview(reviewInput, diagramSha256) {
     reviewer_model: reviewerModel,
     inspection_method: inspectionMethod,
     reviewed_diagram_sha256: reviewedSha256,
-    benchmark_asset_id_or_url: benchmarkReference,
     visual_quality_score: score,
     canvas_occupancy_percent: canvasOccupancyPercent,
     checks: Object.freeze(Object.fromEntries(REQUIRED_DIAGRAM_VISUAL_CHECKS.map((key) => [key, true]))),
