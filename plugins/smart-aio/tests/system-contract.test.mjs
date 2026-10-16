@@ -2668,3 +2668,16 @@ test("workspace article workflow forbids restart prompts and requires marker evi
   assert.match(combined, /黄色マーカー(?:相当)?[^。\n]*2〜4箇所/);
   assert.match(combined, /保存前と再読込後/);
 });
+
+test("workspace plugin requires a desktop local executor before article production", async () => {
+  const orchestrator = await readFile(join(pluginRoot, "skills", "smart-aio-orchestrator", "SKILL.md"), "utf8");
+  const marketplace = JSON.parse(await readFile(resolve(pluginRoot, "..", "..", ".agents", "plugins", "marketplace.json"), "utf8"));
+
+  assert.equal(marketplace.plugins.find((plugin) => plugin.name === "smart-aio")?.policy?.installation, "INSTALLED_BY_DEFAULT");
+  assert.match(orchestrator, /ChatGPTデスクトップアプリのローカルスレッド専用/);
+  assert.match(orchestrator, /SMART_AIO_PLUGIN_NOT_INSTALLED/);
+  assert.match(orchestrator, /installed: false/);
+  assert.match(orchestrator, /SMART_AIO_LOCAL_EXECUTOR_REQUIRED/);
+  assert.match(orchestrator, /select-next-approved-plan/);
+  assert.match(orchestrator, /status=READY/);
+});

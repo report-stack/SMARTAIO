@@ -55,6 +55,8 @@ Smart AIOに関する作業では、ファイル作成、ブラウザ操作、�
 
 実装の正本はこのPluginの `scripts/` 以下に置き、すべての処理を同梱ランタイムから実行する。
 
+このPluginはChatGPTデスクトップアプリのローカルスレッド専用である。記事制作依頼を受けたら、外部保存や本文作成より先にPluginのインストール状態を確認し、`installed: false` の場合は `SMART_AIO_PLUGIN_NOT_INSTALLED` として停止する。インストール済みの場合だけ、ローカル実行環境で次の `verify` を実行し、`status=READY` と保護プロンプト6件の検証成功を確認する。続けて同じローカル実行環境から `select-next-approved-plan` を実行する。CloudのWork会話、Web版、またはローカルコマンドを実行できない会話では手作業で代替せず、`SMART_AIO_LOCAL_EXECUTOR_REQUIRED` として停止し、ChatGPTデスクトップアプリでローカルスレッドを新規作成して同じ依頼を再開するよう案内する。
+
 ```bash
 node scripts/smart_aio_orchestrator.mjs verify
 node scripts/smart_aio_orchestrator.mjs <command> input.json
@@ -77,6 +79,8 @@ node scripts/smart_aio_orchestrator.mjs <command> input.json
 - 保存先が対象顧客配下ではない、または削除の明示確認がない。
 - `drive_scope_evidence` がない、`output_location` が `SMARTAIO_DRIVE` ではない、SMARTAIO本番Driveと直下クライアントフォルダーを確認していない、記事フォルダーが対象クライアントDrive配下ではない、My Drive/root親が残っている、または `03_記事/{記事ID}` の親階層を確認していない。
 - 使用必須のSkillを読み終えていない、使用工程を明示していない、またはSkillの標準フローを手作業で代替しようとしている。
+- ChatGPTデスクトップアプリのローカルスレッドではない、ローカル実行環境を利用できない、または同梱ランタイムの `verify` を実行して `status=READY` を確認できない。
+- Pluginの状態が `installed: false`、または現在の `smart_aio_plugin_version` のローカルキャッシュを確認できない。
 - 記事本文URL、Drive格納先フォルダーURL、タイトル画像1枚・通常画像3枚の画像フォルダーURL、図解画像URL、構造化マークアップ出力物URL、更新したクライアント別記事制作シートURLのいずれかがない、Google URLではない、または実際の保存・更新を確認できない。
 - `audit-client-run` が `STANDARD_CLIENT_RUN_AUDIT_PASS` ではない。設定タブ、ニュース設定、KW記録、カテゴリ・タグ確認、Doc本文にタグ・出典セクションがないこと、構造化マークアップ、レビュー記録、画像・図解検証、内部リンク網、クラスター行、中央記事台帳、実行履歴のいずれかが未確認のまま完成報告へ進めてはならない。
 - 週次・月次レポートまたは改善候補に別顧客のデータ、未計測の順位を計測済みと扱う記述、`07_順位・分析` 以外へのレポート保存、管理台帳へのレポートURL未記録、保護プロンプト本文の自動変更、管理者承認なしのSkill反映が含まれている。
