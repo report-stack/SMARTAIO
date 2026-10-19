@@ -5,7 +5,7 @@ This folder is a workspace-plugin marketplace package for publishing Smart AIO t
 ## Contents
 
 - `.agents/plugins/marketplace.json`: Marketplace entrypoint for workspace import.
-- `plugins/smart-aio/`: Smart AIO plugin package, including Skills, a bundled local MCP runtime, references, scripts, tests, assets, and `.codex-plugin/plugin.json`.
+- `plugins/smart-aio/`: Smart AIO plugin package, including Skills, bundled Node.js scripts, references, tests, assets, and `.codex-plugin/plugin.json`.
 
 ## Admin Publish Steps
 
@@ -17,14 +17,15 @@ This folder is a workspace-plugin marketplace package for publishing Smart AIO t
 6. After sync, open the imported Smart AIO plugin.
 7. Set the installation policy for every target role or group to **Installed by default**. Do not leave Smart AIO at **Available**, because that can leave the desktop client at `installed: false` until each member installs it manually.
 8. Confirm any required connector or app permissions separately.
-9. Ask a target member to restart the ChatGPT desktop app, start a new chat, select SMART AIO_clutch, and verify that Smart AIO reports `installed: true` and that `smart_aio_verify_runtime` returns `status=READY` before requesting article production.
+9. Ask a target member to restart the ChatGPT desktop app, start a new local chat, select SMART AIO_clutch, and verify that Smart AIO reports `installed: true`, that `node --version` succeeds in the local executor, and that the bundled `verify` command returns `status=READY` before requesting article production.
 
 ## Important Notes
 
-- Smart AIO requires the ChatGPT desktop app because its protected-prompt verification and article workflow run through the bundled local MCP server. The MCP server exposes the packaged Node.js runtime as callable tools, so members do not need the source checkout or a manually entered shell command.
-- Browser and Cloud-only execution cannot start this local MCP server. Start a new desktop-app chat after installing or updating the plugin.
+- Smart AIO is a Skills-only desktop plugin. Its protected-prompt verification and article workflow run by calling the bundled Node.js scripts directly from the desktop local executor; it does not use an MCP server.
+- Node.js itself is not bundled. It must be installed on each target computer and visible to the desktop local executor through the `node` command. Members are not asked to type commands manually; the Skill runs the checks and scripts.
+- Browser and Cloud-only execution cannot start these local scripts. Start a new desktop-app local chat after installing or updating the plugin.
 - The marketplace defaults Smart AIO to `INSTALLED_BY_DEFAULT`, but the workspace admin policy remains authoritative. After every GitHub update, the admin must sync the Marketplace and confirm **Installed by default** for all target roles or groups.
 - Treat `installed: false` as a deployment failure. Do not attempt to replace the missing runtime by manually reproducing its steps in the conversation.
-- A clean-device acceptance test requires both `installed: true` and a successful `smart_aio_verify_runtime` result. Seeing the Skills or bundled files alone is not execution evidence.
+- A clean-device acceptance test requires `installed: true`, a successful `node --version`, and a bundled `verify` result of `status=READY`. Seeing the Skills or bundled files alone is not execution evidence.
 - Installing the plugin does not grant Google Drive, Sheets, or other connector access by itself. Each required app or connector permission must be enabled for the target role, and each member may need to authorize their account.
 - IDE extensions do not support plugins. Use supported ChatGPT surfaces, ChatGPT desktop Codex, or Codex CLI.

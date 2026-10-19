@@ -65,13 +65,6 @@ import {
 } from "../skills/smart-aio-orchestrator/scripts/runtime/content-optimization.mjs";
 import { verifyArticleVisualPersistence } from "../skills/smart-aio-orchestrator/scripts/runtime/image-persistence.mjs";
 import { reviewArticle } from "../skills/article-quality-review/scripts/review_article.mjs";
-import {
-  SMART_AIO_RUNTIME_COMMANDS,
-  callSmartAioMcpTool,
-  handleSmartAioMcpRequest,
-  listSmartAioMcpTools,
-} from "../server/smart_aio_mcp_server.mjs";
-
 const pluginRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 const blockedExpressions = [
   String.fromCharCode(108, 101, 103, 97, 99, 121),
@@ -2675,42 +2668,20 @@ test("workspace article workflow forbids restart prompts and requires marker evi
   assert.match(combined, /保存前と再読込後/);
 });
 
-test("workspace plugin installs by default and exposes its bundled runtime through local MCP tools", async () => {
+test("workspace plugin uses the desktop local executor and direct bundled scripts without MCP", async () => {
   const orchestrator = await readFile(join(pluginRoot, "skills", "smart-aio-orchestrator", "SKILL.md"), "utf8");
-  const marketplace = JSON.parse(await readFile(resolve(pluginRoot, "..", "..", ".agents", "plugins", "marketplace.json"), "utf8"));
   const manifest = JSON.parse(await readFile(join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8"));
-  const mcp = JSON.parse(await readFile(join(pluginRoot, ".mcp.json"), "utf8"));
 
-  assert.equal(marketplace.plugins.find((plugin) => plugin.name === "smart-aio")?.policy?.installation, "INSTALLED_BY_DEFAULT");
-  assert.equal(manifest.mcpServers, "./.mcp.json");
-  assert.equal(mcp.mcpServers["smart-aio-runtime"].type, "stdio");
-  assert.equal(mcp.mcpServers["smart-aio-runtime"].command, "node");
-  assert.match(mcp.mcpServers["smart-aio-runtime"].args[0], /\$\{PLUGIN_ROOT\}\/server\/smart_aio_mcp_server\.mjs$/);
-  assert.match(orchestrator, /ChatGPTデスクトップアプリ専用/);
+  assert.equal(Object.hasOwn(manifest, "mcpServers"), false);
+  assert.equal(Object.hasOwn(manifest, "requires_local_executor"), false);
+  assert.match(orchestrator, /MCPサーバーは使用しない/);
   assert.match(orchestrator, /SMART_AIO_PLUGIN_NOT_INSTALLED/);
   assert.match(orchestrator, /installed: false/);
+  assert.match(orchestrator, /node --version/);
+  assert.match(orchestrator, /SMART_AIO_NODE_RUNTIME_REQUIRED/);
   assert.match(orchestrator, /SMART_AIO_LOCAL_EXECUTOR_REQUIRED/);
-  assert.match(orchestrator, /smart_aio_verify_runtime/);
-  assert.match(orchestrator, /smart_aio_select_next_approved_plan/);
-  assert.match(orchestrator, /smart_aio_run_workflow_step/);
+  assert.match(orchestrator, /node scripts\/smart_aio_orchestrator\.mjs verify/);
+  assert.match(orchestrator, /node scripts\/smart_aio_orchestrator\.mjs <command> input\.json/);
+  assert.match(orchestrator, /select-next-approved-plan/);
   assert.match(orchestrator, /status=READY/);
-
-  const listed = listSmartAioMcpTools();
-  assert.deepEqual(listed.map((tool) => tool.name), [
-    "smart_aio_verify_runtime",
-    "smart_aio_select_next_approved_plan",
-    "smart_aio_run_workflow_step",
-  ]);
-  assert.ok(SMART_AIO_RUNTIME_COMMANDS.includes("select-next-approved-plan"));
-
-  const initialized = await handleSmartAioMcpRequest({
-    jsonrpc: "2.0",
-    id: 1,
-    method: "initialize",
-    params: { protocolVersion: "2025-06-18" },
-  });
-  assert.equal(initialized.result.serverInfo.name, "smart-aio-runtime");
-  const verified = await callSmartAioMcpTool("smart_aio_verify_runtime", {});
-  assert.equal(verified.structuredContent.status, "READY");
-  assert.equal(verified.structuredContent.protected_prompts.promptCount, 6);
 });

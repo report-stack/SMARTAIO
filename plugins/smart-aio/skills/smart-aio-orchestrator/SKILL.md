@@ -55,14 +55,14 @@ Smart AIOに関する作業では、ファイル作成、ブラウザ操作、�
 
 実装の正本はこのPluginの `scripts/` 以下に置き、すべての処理を同梱ランタイムから実行する。
 
-このPluginはChatGPTデスクトップアプリ専用であり、同梱ランタイムはローカルMCPツールとして起動する。記事制作依頼を受けたら、外部保存や本文作成より先にPluginのインストール状態を確認し、`installed: false` の場合は `SMART_AIO_PLUGIN_NOT_INSTALLED` として停止する。インストール済みの場合は必ず `smart_aio_verify_runtime` を呼び出し、`status=READY` と保護プロンプト6件の検証成功を確認する。続けて `smart_aio_select_next_approved_plan` を呼び出す。その他の同梱ランタイム工程は `smart_aio_run_workflow_step` から実行する。ファイルが存在することやSkillを読めることだけを実行可能の証拠にしてはならない。MCPツールが表示されない場合は `SMART_AIO_LOCAL_EXECUTOR_REQUIRED` として停止し、管理者へMarketplace同期、対象ロールの既定インストール、デスクトップアプリ再起動を依頼する。CloudのみのWork会話またはWeb版では手作業で代替せず、デスクトップアプリで新しい会話を作成してSMART AIO_clutchを選択し、同じ依頼を再開するよう案内する。
+このPluginはChatGPTデスクトップアプリのローカル実行専用であり、MCPサーバーは使用しない。記事制作依頼を受けたら、外部保存や本文作成より先にPluginのインストール状態を確認し、`installed: false` の場合は `SMART_AIO_PLUGIN_NOT_INSTALLED` として停止する。インストール済みの場合は、読み込んだこのSkillのディレクトリを実行基準にしてローカル実行環境から最初に `node --version` を実行する。`node` を起動できない場合は `SMART_AIO_NODE_RUNTIME_REQUIRED` として停止し、Node.jsの導入またはデスクトップアプリから参照できる実行パスの設定を管理者へ依頼する。Node.jsを確認できた場合だけ、同じローカル実行環境で次の `verify` を実行し、`status=READY` と保護プロンプト6件の検証成功を確認する。続けて `select-next-approved-plan` を実行する。その他の工程も同じ同梱CLIから実行する。ファイルの存在、Skillを読めること、PCの通常ターミナルでNode.jsを実行できることだけを、デスクトップアプリ内での実行成功の証拠にしてはならない。ローカルコマンドを実行できない場合は `SMART_AIO_LOCAL_EXECUTOR_REQUIRED` として停止する。CloudのみのWork会話またはWeb版では手作業で代替せず、デスクトップアプリで新しいローカル会話を作成してSMART AIO_clutchを選択し、同じ依頼を再開するよう案内する。
 
 ```bash
 node scripts/smart_aio_orchestrator.mjs verify
 node scripts/smart_aio_orchestrator.mjs <command> input.json
 ```
 
-上記CLIは開発・診断用である。通常運用では利用者にCLI実行を求めず、Pluginが提供する `smart_aio_verify_runtime`、`smart_aio_select_next_approved_plan`、`smart_aio_run_workflow_step` を使う。
+通常運用でも、このSkillがローカル実行環境から上記CLIを直接実行する。利用者にコマンド入力を求めてはならない。入力JSONは現在のタスク用一時領域へ作成し、Pluginのインストール先やキャッシュ内へ実行データを書き込まない。Pluginの絶対パスを固定せず、読み込んだ `SKILL.md` と同じディレクトリにある `scripts/smart_aio_orchestrator.mjs` を使う。
 
 主なコマンドは `prepare-client-production-sheet`、`validate-client-production-sheet`、`prepare-plan-confirmation-sheet`、`validate-plan-confirmation-candidates`、`select-next-approved-plan`、`prepare-additional-plan-confirmation-ideas`、`prepare-client-source-register`、`validate-client-source-register`、`prepare-client-article-sheet-update`、`prepare-client-onboarding`、`prepare-news-settings-template`、`prepare-basic-info`、`validate-basic-info`、`prepare-site-title`、`validate-site-title`、`prepare-category-slugs`、`validate-category-slugs`、`prepare-images`、`verify-image-persistence`、`verify-article-visual-persistence`、`plan-internal-link-graph`、`prepare-internal-link-sheet-output`、`verify-internal-link-graph`、`build-structured-markup`、`verify-structured-markup`、`prepare-rewrite-plan`、`prepare-rewrite-artifact-output`、`audit-client-run`、`plan-idea`、`prepare-idea`、`analyze-title`、`validate-ideas`、`finalize-idea`、`prepare-article`、`prepare-article-record-update`、`prepare-document-output`、`verify-article-document-readback`、`prepare-xlsx-export`、`prepare-cluster`、`complete-cluster`、`prepare-batch-notification`、`create-batch`、`batch-next`、`apply-batch-step`、`fail-batch-step`、`stop-batch`、`resume-batch`、`create-article-lifecycle`、`advance-article-lifecycle`、`review-article`、`prepare-stage-review`、`evaluate-stage-review`、`draft-workflow`、`plan-skill`、`evaluate-skill`、`evaluate-skill-run`、`propose-skill-fix`、`curate-skill-feedback`、`authorize-skill-change`、`create-readiness`、`record-readiness`、`evaluate-readiness`、`prepare-scheduled-tasks`、`authorize-scheduled-task`、`create-performance-report`、`create-report-schedule`、`analyze-performance-feedback`、`propose-performance-skill-update`、`news-proposal`、`prepare-ahrefs`、`deletion-plan` である。
 画像保存後は `verify-article-visual-persistence`、構造化マークアップ保存後は `verify-structured-markup`、内部リンク設定後は `verify-internal-link-graph`、記事保存後の完成報告は `prepare-completion-report` を使う。画像プロンプトだけ、画像名の記録だけ、アイキャッチ指定だけ、構造化マークアップ案だけ、内部リンク候補だけでは完了にしない。
@@ -81,7 +81,7 @@ node scripts/smart_aio_orchestrator.mjs <command> input.json
 - 保存先が対象顧客配下ではない、または削除の明示確認がない。
 - `drive_scope_evidence` がない、`output_location` が `SMARTAIO_DRIVE` ではない、SMARTAIO本番Driveと直下クライアントフォルダーを確認していない、記事フォルダーが対象クライアントDrive配下ではない、My Drive/root親が残っている、または `03_記事/{記事ID}` の親階層を確認していない。
 - 使用必須のSkillを読み終えていない、使用工程を明示していない、またはSkillの標準フローを手作業で代替しようとしている。
-- ChatGPTデスクトップアプリではない、ローカルMCPツールを利用できない、または `smart_aio_verify_runtime` を実行して `status=READY` を確認できない。
+- ChatGPTデスクトップアプリのローカル会話ではない、ローカル実行環境を利用できない、`node --version` を実行できない、または同梱ランタイムの `verify` を実行して `status=READY` を確認できない。
 - Pluginの状態が `installed: false`、または現在の `smart_aio_plugin_version` のローカルキャッシュを確認できない。
 - 記事本文URL、Drive格納先フォルダーURL、タイトル画像1枚・通常画像3枚の画像フォルダーURL、図解画像URL、構造化マークアップ出力物URL、更新したクライアント別記事制作シートURLのいずれかがない、Google URLではない、または実際の保存・更新を確認できない。
 - `audit-client-run` が `STANDARD_CLIENT_RUN_AUDIT_PASS` ではない。設定タブ、ニュース設定、KW記録、カテゴリ・タグ確認、Doc本文にタグ・出典セクションがないこと、構造化マークアップ、レビュー記録、画像・図解検証、内部リンク網、クラスター行、中央記事台帳、実行履歴のいずれかが未確認のまま完成報告へ進めてはならない。
