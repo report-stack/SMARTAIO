@@ -1,11 +1,12 @@
 {
   "name": "smart-aio",
-  "version": "0.1.8+codex.20261019061906",
+  "version": "0.1.8+codex.20261019073159",
   "description": "Smart AIO新システムで顧客登録から記事制作、品質確認、保存までを完結する共通Skills",
   "author": {
     "name": "Smart AIO Team"
   },
   "skills": "./skills/",
+  "requires_local_executor": true,
   "interface": {
     "displayName": "SMART AIO_clutch",
     "shortDescription": "顧客別の記事制作を一貫管理",

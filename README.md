@@ -21,7 +21,7 @@ This folder is a workspace-plugin marketplace package for publishing Smart AIO t
 
 ## Important Notes
 
-- Smart AIO is a Skills-only desktop plugin. Its protected-prompt verification and article workflow run by calling the bundled Node.js scripts directly from the desktop local executor; it does not use an MCP server.
+- Smart AIO is a Skills-only desktop plugin. Its manifest declares `requires_local_executor: true`, so supported clients treat it as desktop-only. Its protected-prompt verification and article workflow run by calling the bundled Node.js scripts directly from the desktop local executor; it does not use an MCP server.
 - Node.js itself is not bundled. It must be installed on each target computer and visible to the desktop local executor through the `node` command. Members are not asked to type commands manually; the Skill runs the checks and scripts.
 - Browser and Cloud-only execution cannot start these local scripts. Start a new desktop-app local chat after installing or updating the plugin.
 - The marketplace defaults Smart AIO to `INSTALLED_BY_DEFAULT`, but the workspace admin policy remains authoritative. After every GitHub update, the admin must sync the Marketplace and confirm **Installed by default** for all target roles or groups.

@@ -2673,7 +2673,7 @@ test("workspace plugin uses the desktop local executor and direct bundled script
   const manifest = JSON.parse(await readFile(join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8"));
 
   assert.equal(Object.hasOwn(manifest, "mcpServers"), false);
-  assert.equal(Object.hasOwn(manifest, "requires_local_executor"), false);
+  assert.equal(manifest.requires_local_executor, true);
   assert.match(orchestrator, /MCPサーバーは使用しない/);
   assert.match(orchestrator, /SMART_AIO_PLUGIN_NOT_INSTALLED/);
   assert.match(orchestrator, /installed: false/);
