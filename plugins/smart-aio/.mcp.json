@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "smart-aio-runtime": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "${PLUGIN_ROOT}/server/smart_aio_mcp_server.mjs"
+      ],
+      "cwd": "${PLUGIN_ROOT}"
+    }
+  }
+}
